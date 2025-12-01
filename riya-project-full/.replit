@@ -1,0 +1,47 @@
+# Replit Configuration
+# This file helps Replit understand your project
+
+# Run command when Replit starts
+run = "npm run dev"
+
+# Language
+language = "nodejs"
+
+# Entry point
+entrypoint = "server/index.ts"
+
+# Git integration
+[gitHubImport]
+requiredFiles = [".replit", "package.json"]
+
+# Nix environment
+[nix]
+channel = "stable-22.11"
+
+# Deploy configuration
+[deploy]
+publicDir = "dist/public"
+run = ["sh", "-c", "npm run build && npm run start"]
+
+# Unit tests
+[unitTest]
+language = "nodejs"
+
+# LSP (Language Server Protocol)
+[languages.javascript]
+pattern = "**/*.{js,jsx,ts,tsx}"
+
+[languages.javascript.languageServer]
+start = "typescript-language-server --stdio"
+
+# Environment variables template
+[env]
+NODE_ENV = "development"
+PORT = "3000"
+
+# Git sync helper
+[gitSync]
+enabled = true
+autoPull = false
+autoPush = false
+

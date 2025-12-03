@@ -140,7 +140,7 @@ export async function sendChatMessageStreaming(
               callbacks.onComplete({
                 sessionId: data.sessionId,
                 messageCount: data.messageCount,
-                messageLimit: data.messageLimit || 20,
+                messageLimit: data.messageLimit || 100,
               });
               return { success: true };
             }

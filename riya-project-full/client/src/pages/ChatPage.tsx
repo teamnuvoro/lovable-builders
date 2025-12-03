@@ -1,16 +1,27 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type Message, type Session } from "@shared/schema";
-import { ChatHeader } from "@/components/chat/ChatHeader";
 import { ChatMessages } from "@/components/chat/ChatMessages";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { PaywallSheet } from "@/components/paywall/PaywallSheet";
+import { AmplitudePasswordModal } from "@/components/AmplitudePasswordModal";
+import { ExitIntentModal } from "@/components/ExitIntentModal";
+import { useExitIntent } from "@/hooks/useExitIntent";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Skeleton } from "@/components/ui/skeleton";
 import { analytics } from "@/lib/analytics";
+import { useLocation } from "wouter";
+import { 
+  trackChatOpened, 
+  trackMessageSent, 
+  trackMessageReceived,
+  trackSessionStarted,
+  trackMessageLimitHit,
+  trackPaywallShown
+} from "@/utils/amplitudeTracking";
 
 interface OptimisticMessage {
   id: string;
@@ -23,9 +34,28 @@ interface OptimisticMessage {
 }
 
 export default function ChatPage() {
+  const [, setLocation] = useLocation();
   const [isTyping, setIsTyping] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<string>("");
   const [paywallOpen, setPaywallOpen] = useState(false);
+  const [amplitudePasswordOpen, setAmplitudePasswordOpen] = useState(false);
+  
+  // Exit intent detection - triggers when user tries to leave
+  const { showModal: showExitModal, closeModal: closeExitModal } = useExitIntent({
+    enabled: true,
+    sensitivity: 30,
+    delay: 60000, // Show again after 60 seconds
+  });
+
+  // Listen for paywall open event from navbar
+  useEffect(() => {
+    const handleOpenPaywall = () => {
+      setPaywallOpen(true);
+      trackPaywallShown('chat_limit');
+    };
+    window.addEventListener('openPaywall', handleOpenPaywall);
+    return () => window.removeEventListener('openPaywall', handleOpenPaywall);
+  }, []);
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([]);
   const [failedMessage, setFailedMessage] = useState<string>("");
   const { toast } = useToast();
@@ -54,6 +84,14 @@ export default function ChatPage() {
     refetchInterval: false, // Disable auto-refetch to prevent message disappearing
     staleTime: 30000, // Consider data fresh for 30 seconds
   });
+
+  // Track chat opened and session started (after session and messages are defined)
+  useEffect(() => {
+    if (session?.id) {
+      trackChatOpened('riya', user?.premium_user || false);
+      trackSessionStarted('chat', messages.length + 1);
+    }
+  }, [session?.id, user?.premium_user, messages.length]);
 
   useEffect(() => {
     if (messages.length > 0 && optimisticMessages.length > 0) {
@@ -124,7 +162,7 @@ export default function ChatPage() {
 
   const isLoading = isSessionLoading;
   const isDev = import.meta.env.MODE === 'development';
-  const isLimitReached = !isDev && (userUsage?.messageLimitReached || userUsage?.callLimitReached) && !userUsage?.premiumUser;
+  const isLimitReached = false; // Disabled for testing - no message limits
 
   const generateTempId = () => `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -316,6 +354,9 @@ export default function ChatPage() {
     const optimisticMsg = addOptimisticMessage(content);
     if (!optimisticMsg) return;
 
+    // Track message sent
+    trackMessageSent(content.length, messages.length + 1);
+    
     analytics.track("message_sent", {
       length: content.length,
       voiceMode: voiceModeEnabled
@@ -350,8 +391,7 @@ export default function ChatPage() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col h-screen w-full">
-        <div className="gradient-header h-16" />
+      <div className="flex flex-col h-full w-full">
         <div className="flex-1 overflow-hidden flex flex-col gap-4 p-4 bg-gradient-to-b from-purple-50/50 to-white">
           <Skeleton className="h-16 w-3/4 rounded-2xl" />
           <Skeleton className="h-12 w-2/3 rounded-2xl ml-auto" />
@@ -362,19 +402,54 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full max-w-full bg-white overflow-hidden">
-      {/* Fixed Header - Responsive */}
-      <div className="flex-shrink-0 w-full">
-        <ChatHeader 
-          sessionId={session?.id} 
-          voiceModeEnabled={voiceModeEnabled}
-          onVoiceModeToggle={() => setVoiceModeEnabled(!voiceModeEnabled)}
-          onPaymentClick={() => setPaywallOpen(true)}
-          userUsage={userUsage}
-        />
-      </div>
+    <div className="flex flex-col h-full w-full max-w-full bg-white overflow-hidden relative">
+      {/* Floating Amplitude Analytics Button */}
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          console.log('🔒 Lock button clicked! Opening password prompt...');
+          setAmplitudePasswordOpen(true);
+        }}
+        className="flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all duration-300"
+        style={{
+          position: 'fixed',
+          bottom: '100px',
+          right: '24px',
+          width: '56px',
+          height: '56px',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          borderRadius: '50%',
+          border: '3px solid white',
+          cursor: 'pointer',
+          fontSize: '24px',
+          zIndex: 9999,
+          pointerEvents: 'auto',
+          animation: 'pulse 2s ease-in-out infinite',
+        }}
+        title="Open Amplitude Dashboard (Password Protected)"
+        data-testid="amplitude-lock-button"
+      >
+        🔒
+      </button>
 
-      {/* Scrollable Messages Area - Flexible */}
+      {/* Amplitude Password Modal */}
+      <AmplitudePasswordModal
+        isOpen={amplitudePasswordOpen}
+        onClose={() => setAmplitudePasswordOpen(false)}
+        onSuccess={() => {
+          console.log('✅ Password correct! Opening Amplitude...');
+          window.open('https://app.amplitude.com/analytics/silent-math-691128', '_blank');
+        }}
+      />
+
+      {/* Exit Intent Modal */}
+      <ExitIntentModal
+        isOpen={showExitModal}
+        onClose={closeExitModal}
+      />
+
+      {/* Scrollable Messages Area - Takes full height minus input */}
       <div className="flex-1 min-h-0 w-full overflow-hidden">
         <ChatMessages 
           messages={displayMessages as Message[]} 
@@ -384,7 +459,7 @@ export default function ChatPage() {
         />
       </div>
 
-      {/* Fixed Input - Responsive */}
+      {/* Fixed Input at Bottom - Responsive */}
       <div className="flex-shrink-0 w-full">
         <ChatInput 
           onSendMessage={handleSendMessage}
@@ -397,6 +472,18 @@ export default function ChatPage() {
       </div>
 
       <PaywallSheet open={paywallOpen} onOpenChange={setPaywallOpen} />
+
+      {/* Add CSS for pulse animation */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% {
+            box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7);
+          }
+          50% {
+            box-shadow: 0 0 0 15px rgba(102, 126, 234, 0);
+          }
+        }
+      `}</style>
     </div>
   );
 }

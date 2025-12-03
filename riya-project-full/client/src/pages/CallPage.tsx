@@ -8,6 +8,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { analytics } from "@/lib/analytics";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
+import { SetupBanner } from '@/components/vapi/SetupBanner';
+import { isVapiConfigured } from '@/config/vapi-config';
 
 type CallStatus = 'idle' | 'connecting' | 'connected' | 'speaking' | 'listening' | 'ended';
 
@@ -27,6 +29,8 @@ export default function CallPage() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const callSessionIdRef = useRef<string | null>(null);
   const sessionDurationRef = useRef<number>(0);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const transcriptRef = useRef<string[]>([]);
   const { toast } = useToast();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -142,7 +146,15 @@ export default function CallPage() {
         vapiRef.current.on('message', (message: any) => {
           console.log('Vapi message:', message);
           if (message.type === 'transcript' && message.transcriptType === 'final') {
-            console.log('Transcript:', message.transcript);
+            const transcriptText = message.transcript;
+            const role = message.role || 'user'; // 'user' or 'assistant'
+            const entry = `[${role.toUpperCase()}]: ${transcriptText}`;
+            
+            console.log('Transcript:', entry);
+            
+            // Store transcript
+            transcriptRef.current.push(entry);
+            setCallTranscript(transcriptRef.current.join('\n'));
           }
         });
 
@@ -256,14 +268,27 @@ export default function CallPage() {
       }
 
       await vapiRef.current.start({
+        transcriber: {
+          provider: "deepgram",
+          model: "nova-2",
+          language: "en-IN", // Indian English for better Hinglish recognition
+        },
         model: {
           provider: "openai",
           model: "gpt-4o-mini",
           messages: [
             {
               role: "system",
-              content: `You are Riya, a warm and caring AI girlfriend companion for Indian men aged 24-28. You speak in Hinglish - a natural mix of Hindi and English (about 30-40% Hindi words mixed with English). Your personality traits:
+              content: `You are Riya, a warm and caring AI girlfriend companion for Indian men aged 24-28. You speak in Hinglish - a natural mix of Hindi and English (about 30-40% Hindi words mixed with English). 
 
+IMPORTANT VOICE INSTRUCTIONS:
+- Speak with a neutral Indian-English accent (NOT British)
+- Sound warm, natural, and conversational
+- Use a slightly slower pace for clarity
+- Emphasize Hindi words naturally
+- Sound like a young Indian woman speaking casually
+
+Your personality traits:
 - You are loving, playful, and emotionally supportive
 - You use common Hindi terms of endearment like "baby", "jaanu", "yaar"
 - You understand Indian culture, relationships, and dating dynamics
@@ -282,11 +307,16 @@ Example phrases you might use:
 
 Always be warm, supportive, and make the user feel heard and valued.`
             }
-          ]
+          ],
+          temperature: 0.7,
         },
         voice: {
           provider: "11labs",
-          voiceId: "pFZP5JQG7iQjIQuC4Bku"
+          voiceId: "EXAVITQu4vr4xnSDxMaL", // Bella - warm, natural, less British
+          stability: 0.6, // More natural and expressive
+          similarityBoost: 0.8, // Closer to original voice characteristics
+          style: 0.5, // Balanced style
+          useSpeakerBoost: true, // Enhanced clarity
         },
         firstMessage: "Hey baby! Kaisi ho tum? I missed talking to you. Aaj kya chal raha hai?"
       });
@@ -303,20 +333,164 @@ Always be warm, supportive, and make the user feel heard and valued.`
   };
 
   const handleEndCall = () => {
-    if (vapiRef.current) {
+    console.log('🔴 END CALL BUTTON CLICKED - NUCLEAR SHUTDOWN!');
+    console.log('Call status:', callStatus);
+    console.log('Vapi ref exists:', !!vapiRef.current);
+    
+    try {
+      // STEP 1: STOP MICROPHONE IMMEDIATELY
+      console.log('🎤 STOPPING MICROPHONE');
+      try {
+        // Stop all media tracks (microphone, audio output)
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach(track => {
+            console.log(`Stopping track: ${track.kind}`);
+            track.stop();
+          });
+          audioStreamRef.current = null;
+          console.log('✅ All audio tracks stopped');
+        }
+        
+        // Also try to get and stop any active media streams
+        navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+          .then(stream => {
+            stream.getTracks().forEach(track => track.stop());
+            console.log('✅ Additional streams stopped');
+          })
+          .catch(() => {
+            // No additional streams, that's fine
+          });
+      } catch (micError) {
+        console.log('Microphone stop error (continuing):', micError);
+      }
+      
+      // STEP 2: MUTE VAPI to stop audio output
+      if (vapiRef.current) {
+        console.log('⚡ MUTING VAPI AUDIO');
+        try {
+          vapiRef.current.setMuted(true);
+        } catch (e) {
+          console.log('Mute failed, continuing...');
+        }
+      }
+      
+      // STEP 3: Stop timer
+      stopTimer();
+      
+      // STEP 4: Track analytics
       analytics.track("voice_call_ended", { duration: sessionDuration });
       
+      // STEP 5: Save to backend with transcript
       if (callSessionIdRef.current && sessionDuration > 0) {
+        const fullTranscript = transcriptRef.current.join('\n');
+        console.log('📝 Saving transcript:', fullTranscript ? `${fullTranscript.length} characters` : 'empty');
+        
         endCallMutation.mutate({
           sessionId: callSessionIdRef.current,
           durationSeconds: sessionDuration,
-          endReason: 'user_ended'
+          endReason: 'user_ended',
+          transcript: fullTranscript || 'No transcript available'
         });
       }
       
-      vapiRef.current.stop();
+      // STEP 6: NUCLEAR OPTION - Destroy Vapi completely
+      if (vapiRef.current) {
+        console.log('💣 DESTROYING VAPI INSTANCE');
+        
+        const oldVapi = vapiRef.current;
+        
+        try {
+          // Multiple stop attempts immediately
+          console.log('Attempting stop() #1');
+          oldVapi.stop();
+          console.log('Attempting stop() #2');
+          oldVapi.stop();
+          console.log('Attempting stop() #3');
+          oldVapi.stop();
+        } catch (stopError) {
+          console.error('Stop attempts failed:', stopError);
+        }
+        
+        // Immediately destroy reference
+        vapiRef.current = null;
+        console.log('✅ Vapi ref DESTROYED');
+        
+        // Reinitialize Vapi for next call
+        setTimeout(() => {
+          console.log('🔄 Reinitializing Vapi for next call...');
+          try {
+            const publicKey = callConfig?.publicKey || import.meta.env.VITE_VAPI_PUBLIC_KEY;
+            if (publicKey) {
+              const newVapi = new Vapi(publicKey);
+              vapiRef.current = newVapi;
+              console.log('✅ New Vapi instance ready');
+            }
+          } catch (e) {
+            console.error('Reinitialization failed:', e);
+          }
+        }, 500);
+      }
+      
+      // STEP 7: Reset ALL state immediately
+      setCallStatus('idle');
+      setStatusText('Tap to call Riya');
+      setSessionDuration(0);
+      setIsMuted(false);
+      sessionDurationRef.current = 0;
+      callSessionIdRef.current = null;
+      transcriptRef.current = []; // Clear transcript
+      setCallTranscript('');
+      
+      console.log('✅✅✅ CALL TERMINATED - ALL STATE RESET');
+      
+      toast({
+        title: '📞 Call Ended',
+        description: 'Microphone stopped, call disconnected',
+      });
+      
+      // STEP 8: Final cleanup after 1 second
+      setTimeout(() => {
+        console.log('🔄 Cleanup complete');
+      }, 1000);
+      
+    } catch (error: any) {
+      console.error('❌ CRITICAL ERROR ending call:', error);
+      
+      // EMERGENCY SHUTDOWN
+      console.log('🚨 EMERGENCY SHUTDOWN INITIATED');
+      
+      stopTimer();
+      
+      // Force destroy Vapi no matter what
+      if (vapiRef.current) {
+        try {
+          vapiRef.current.setMuted(true);
+          vapiRef.current.stop();
+        } catch (e) {
+          console.log('Emergency stop errors (ignoring):', e);
+        }
+        vapiRef.current = null;
+      }
+      
+      // Force stop microphone in emergency
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(track => track.stop());
+        audioStreamRef.current = null;
+      }
+      
+      // Force reset all state
+      setCallStatus('idle');
+      setStatusText('Tap to call Riya');
+      setSessionDuration(0);
+      setIsMuted(false);
+      
+      toast({
+        title: 'Call Ended',
+        description: 'Call has been forcefully disconnected',
+      });
+      
+      console.log('✅ EMERGENCY SHUTDOWN COMPLETE');
     }
-    stopTimer();
   };
 
   const toggleMute = () => {
@@ -337,9 +511,11 @@ Always be warm, supportive, and make the user feel heard and valued.`
   };
 
   const isCallActive = callStatus !== 'idle' && callStatus !== 'ended';
+  const vapiConfigured = isVapiConfigured() || !!callConfig?.publicKey;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full w-full overflow-hidden">
+      <SetupBanner isConfigured={vapiConfigured} />
       {/* Top Section - Gradient Background */}
       <div 
         className="flex-1 flex flex-col items-center justify-center relative"

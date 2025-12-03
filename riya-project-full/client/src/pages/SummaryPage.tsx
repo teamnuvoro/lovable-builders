@@ -95,7 +95,7 @@ export default function SummaryPage() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-white flex flex-col">
+    <div className="h-full w-full bg-white flex flex-col overflow-auto">
       {/* Full-width Gradient Header Banner - Responsive */}
       <div className="relative bg-gradient-to-r from-purple-500 via-pink-500 to-purple-600 text-white px-3 sm:px-4 md:px-6 py-6 sm:py-8 md:py-12 w-full">
         <div className="max-w-4xl mx-auto w-full relative">

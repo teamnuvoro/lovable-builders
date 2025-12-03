@@ -174,7 +174,7 @@ router.get('/api/user/usage', async (req: Request, res: Response) => {
       messageCount: stats.total_messages,
       callDuration: stats.total_call_seconds,
       premiumUser: isPremium,
-      messageLimitReached: !isPremium && stats.total_messages >= 20,
+      messageLimitReached: false, // Disabled for testing
       callLimitReached: !isPremium && stats.total_call_seconds >= 135,
     });
   } catch (error: any) {

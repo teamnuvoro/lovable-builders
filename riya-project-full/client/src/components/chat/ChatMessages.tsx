@@ -24,7 +24,9 @@ export function ChatMessages({ messages, isLoading, isMobile, isTyping }: ChatMe
 
   const scrollToBottom = () => {
     if (isNearBottom) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      }, 100); // Small delay for smoother scroll after message animation
     }
   };
 

@@ -64,4 +64,4 @@ Upgrade to continue chatting with Riya:
 
 Your love story is just beginning... unlock unlimited chat today! 💕`;
 
-export const FREE_MESSAGE_LIMIT = 20;
+export const FREE_MESSAGE_LIMIT = 999999; // Effectively unlimited for testing

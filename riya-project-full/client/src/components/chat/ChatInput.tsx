@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, Mic } from "lucide-react";
+import { Send, Loader2, Mic, MicOff } from "lucide-react";
+import { useSpeechToText } from "@/hooks/useSpeechToText";
+import { useToast } from "@/hooks/use-toast";
+import { VoiceRecordingModal } from "@/components/VoiceRecordingModal";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
@@ -31,13 +34,43 @@ export function ChatInput({
   failedMessage
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
+  const [showVoiceModal, setShowVoiceModal] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const { toast } = useToast();
+  const { 
+    isRecording, 
+    transcript, 
+    error: speechError, 
+    startRecording, 
+    stopRecording, 
+    resetTranscript 
+  } = useSpeechToText();
 
   useEffect(() => {
     if (failedMessage) {
       setMessage(failedMessage);
     }
   }, [failedMessage]);
+
+  // Update message when transcript is available
+  useEffect(() => {
+    if (transcript) {
+      setMessage(prev => prev ? `${prev} ${transcript}` : transcript);
+      setIsTranscribing(false);
+      // Keep modal open to show transcript
+    }
+  }, [transcript]);
+
+  // Show error toast if speech recognition fails
+  useEffect(() => {
+    if (speechError) {
+      toast({
+        title: "Recording Error",
+        description: speechError,
+        variant: "destructive",
+      });
+    }
+  }, [speechError, toast]);
 
   const handleSend = () => {
     if (message.trim() && !isLoading && !disabled) {
@@ -54,8 +87,45 @@ export function ChatInput({
     }
   };
 
+  const handleMicClick = async () => {
+    if (isRecording) {
+      setIsTranscribing(true);
+      await stopRecording();
+    } else {
+      setShowVoiceModal(true);
+      await startRecording();
+    }
+  };
+
+  const handleModalClose = async () => {
+    if (isRecording) {
+      setIsTranscribing(true);
+      await stopRecording();
+    } else {
+      setShowVoiceModal(false);
+      resetTranscript();
+    }
+  };
+
+  const handleSendTranscript = () => {
+    setShowVoiceModal(false);
+    resetTranscript();
+    // Message is already in the input, user can edit if needed
+  };
+
   return (
-    <div className="bg-white border-t border-gray-100 px-3 sm:px-4 py-2.5 sm:py-3 space-y-2 sm:space-y-3 shadow-lg w-full">
+    <>
+      {/* Voice Recording Modal */}
+      <VoiceRecordingModal
+        isOpen={showVoiceModal}
+        isRecording={isRecording}
+        isTranscribing={isTranscribing}
+        transcript={transcript}
+        onClose={handleModalClose}
+        onSend={handleSendTranscript}
+      />
+
+      <div className="bg-white border-t border-gray-100 px-3 sm:px-4 py-2.5 sm:py-3 space-y-2 sm:space-y-3 shadow-lg w-full">
       {/* Quick Replies - Responsive */}
       {quickReplies && quickReplies.length > 0 && (
         <div className="flex flex-wrap gap-1.5 sm:gap-2 animate-fade-in">
@@ -77,16 +147,21 @@ export function ChatInput({
       {/* Input Row - Responsive Flexbox */}
       <div className="flex items-center gap-2 sm:gap-3 w-full">
         <button
-          onClick={() => setIsRecording(!isRecording)}
+          onClick={handleMicClick}
           disabled={isLoading || disabled}
           className={`p-2.5 sm:p-3 rounded-full transition-all duration-300 flex-shrink-0 ${
             isRecording
               ? "bg-gradient-to-r from-red-500 to-pink-500 text-white animate-pulse shadow-lg shadow-red-300/50"
               : "bg-gradient-to-r from-gray-100 to-gray-50 text-gray-500 hover:from-gray-200 hover:to-gray-100 hover:shadow-md"
           }`}
+          title={isRecording ? "Stop recording" : "Start recording"}
           data-testid="button-voice-record"
         >
-          <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
+          {isRecording ? (
+            <MicOff className="w-4 h-4 sm:w-5 sm:h-5" />
+          ) : (
+            <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
+          )}
         </button>
         
         <div className="flex-1 min-w-0 relative">
@@ -116,5 +191,6 @@ export function ChatInput({
         </button>
       </div>
     </div>
+    </>
   );
 }

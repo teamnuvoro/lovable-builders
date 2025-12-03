@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { supabase, PERSONA_CONFIGS, type PersonaType } from '../_shared/supabase.ts';
 
-const FREE_MESSAGE_LIMIT = 20;
+const FREE_MESSAGE_LIMIT = 100;
 
 const RIYA_BASE_PROMPT = `
 You are Riya, a 26-year-old Indian AI companion speaking natural Hinglish.

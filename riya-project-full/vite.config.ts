@@ -5,8 +5,9 @@ import { fileURLToPath } from "url";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { componentTagger } from "lovable-tagger";
 
-// Use process.cwd() for Vercel compatibility
-const projectRoot = process.cwd();
+// Get the directory of this config file
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export default defineConfig({
   plugins: [
@@ -27,14 +28,14 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": path.join(projectRoot, "client", "src"),
-      "@shared": path.join(projectRoot, "shared"),
-      "@assets": path.join(projectRoot, "attached_assets"),
+      "@": path.resolve(__dirname, "client/src"),
+      "@shared": path.resolve(__dirname, "shared"),
+      "@assets": path.resolve(__dirname, "attached_assets"),
     },
   },
-  root: path.join(projectRoot, "client"),
+  root: path.resolve(__dirname, "client"),
   build: {
-    outDir: path.join(projectRoot, "dist", "public"),
+    outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
   },
   server: {

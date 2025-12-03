@@ -18,8 +18,8 @@ else
     exit 1
 fi
 
-echo "🔨 Running vite build..."
-npx vite build
+echo "🔨 Running vite build with explicit config..."
+npx vite build --config ./vite.config.ts
 
 if [ $? -eq 0 ]; then
     echo "✅ Vite build succeeded!"

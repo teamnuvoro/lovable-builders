@@ -21,7 +21,7 @@ const inMemoryMessages: Map<string, InMemoryMessage[]> = new Map();
 
 function buildSystemPrompt(persona: PersonaType, recentMessages: string): string {
   const config = PERSONA_CONFIGS[persona] || PERSONA_CONFIGS.sweet_supportive;
-  
+
   return `
 ${RIYA_BASE_PROMPT}
 
@@ -288,7 +288,7 @@ router.post("/api/chat", async (req: Request, res: Response) => {
         })
         .select()
         .single();
-      
+
       finalSessionId = newSession?.id || crypto.randomUUID();
     } else if (!finalSessionId) {
       finalSessionId = crypto.randomUUID();
@@ -337,9 +337,18 @@ router.post("/api/chat", async (req: Request, res: Response) => {
       }
     }
 
-    // Check Groq API key - try env first, then Supabase config
-    let groqApiKey = process.env.GROQ_API_KEY;
-    
+    // Check Groq API key - try env first, then// Initialize Groq client
+    let groq: Groq | null = null;
+    try {
+      if (process.env.GROQ_API_KEY) {
+        groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+      } else {
+        console.warn("[Groq] GROQ_API_KEY not found. Chat will fail.");
+      }
+    } catch (e) {
+      console.error("[Groq] Failed to initialize:", e);
+    }
+
     // If not in env, try to fetch from Supabase config table (if exists)
     if (!groqApiKey && isSupabaseConfigured) {
       try {
@@ -348,7 +357,7 @@ router.post("/api/chat", async (req: Request, res: Response) => {
           .select('value')
           .eq('key', 'GROQ_API_KEY')
           .single();
-        
+
         if (config?.value) {
           groqApiKey = config.value;
           console.log("[Chat] Retrieved GROQ_API_KEY from Supabase");
@@ -358,7 +367,7 @@ router.post("/api/chat", async (req: Request, res: Response) => {
         console.log("[Chat] Could not fetch GROQ_API_KEY from Supabase config");
       }
     }
-    
+
     if (!groqApiKey || groqApiKey === 'your-groq-api-key-here') {
       console.error("[Chat] GROQ_API_KEY not configured");
       return res.status(500).json({ error: "AI service not configured. Please set GROQ_API_KEY in .env or Supabase app_config table." });
@@ -478,9 +487,9 @@ router.post("/api/chat", async (req: Request, res: Response) => {
       }
 
       // Send completion signal with the full response so frontend can display it
-      const doneData = `data: ${JSON.stringify({ 
-        content: "", 
-        done: true, 
+      const doneData = `data: ${JSON.stringify({
+        content: "",
+        done: true,
         sessionId: finalSessionId,
         messageCount: messageCount + 1,
         messageLimit: FREE_MESSAGE_LIMIT,
@@ -498,7 +507,7 @@ router.post("/api/chat", async (req: Request, res: Response) => {
 
   } catch (error: any) {
     console.error("[Chat] Error:", error);
-    
+
     // If headers already sent, just end
     if (res.headersSent) {
       const errorData = `data: ${JSON.stringify({ error: error.message, done: true })}\n\n`;

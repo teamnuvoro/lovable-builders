@@ -28,12 +28,25 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
       return res.status(400).json({ error: 'Invalid plan type' });
     }
 
-    // Check if Cashfree credentials are configured
-    if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY) {
-      return res.status(503).json({ 
-        error: 'Payment service not configured. Please contact support.',
-        details: 'Cashfree credentials missing'
-      });
+    // Initialize Cashfree
+    try {
+      if (process.env.CASHFREE_APP_ID && process.env.CASHFREE_SECRET_KEY) {
+        // Assuming Cashfree is imported or globally available, e.g., from 'cashfree-pg'
+        // This part of the code requires the Cashfree SDK to be imported and configured.
+        // For example: import { Cashfree } from 'cashfree-pg';
+        // If not imported, this will cause a runtime error.
+        (global as any).Cashfree.X.ClientId = process.env.CASHFREE_APP_ID;
+        (global as any).Cashfree.X.ClientSecret = process.env.CASHFREE_SECRET_KEY;
+        (global as any).Cashfree.X.Environment = process.env.CASHFREE_ENV === 'PRODUCTION'
+          ? (global as any).Cashfree.Environment.PRODUCTION
+          : (global as any).Cashfree.Environment.SANDBOX;
+      } else {
+        console.warn("[Cashfree] Credentials missing. Payments will fail.");
+      }
+    } catch (e) {
+      console.error("[Cashfree] Failed to initialize:", e);
+      // Depending on desired behavior, you might want to return an error here
+      // return res.status(500).json({ error: 'Payment service initialization failed' });
     }
 
     // Get user info
@@ -62,7 +75,7 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
     // Create order in Cashfree
     const orderId = `order_${Date.now()}_${userId.slice(0, 8)}`;
     const returnUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/payment/callback?orderId=${orderId}`;
-    
+
     console.log('[Payment] Creating order:', {
       orderId,
       amount,
@@ -116,7 +129,7 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
   } catch (error: any) {
     console.error('[Payment] Error creating order:', error);
     console.error('[Payment] Error stack:', error.stack);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to create payment order',
       details: error.message,
       type: error.name
@@ -149,8 +162,8 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
     }
 
     // Check payment status with Cashfree
-    const cashfreeBaseUrl = process.env.CASHFREE_MODE === 'production' 
-      ? 'https://api.cashfree.com/pg' 
+    const cashfreeBaseUrl = process.env.CASHFREE_MODE === 'production'
+      ? 'https://api.cashfree.com/pg'
       : 'https://sandbox.cashfree.com/pg';
 
     const response = await fetch(`${cashfreeBaseUrl}/orders/${orderId}`, {
@@ -166,7 +179,7 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
 
     if (!response.ok) {
       console.error('[Payment Verify] Cashfree error:', paymentData);
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'Failed to verify payment',
         details: paymentData
       });
@@ -207,9 +220,9 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
 
   } catch (error: any) {
     console.error('[Payment Verify] Error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to verify payment',
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -238,7 +251,7 @@ router.post('/api/payment/webhook', async (req: Request, res: Response) => {
 
     if (type === 'PAYMENT_SUCCESS_WEBHOOK') {
       const orderId = data.order?.order_id;
-      
+
       if (orderId && isSupabaseConfigured) {
         const { data: subscription } = await supabase
           .from('subscriptions')

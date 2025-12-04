@@ -1,7 +1,20 @@
 import { Router, Request, Response } from "express";
 import { supabase, isSupabaseConfigured } from "../supabase";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const router = Router();
+
+// Initialize Gemini
+let genAI: GoogleGenerativeAI | null = null;
+try {
+  if (process.env.GEMINI_API_KEY) {
+    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  } else {
+    console.warn("[Summary] GEMINI_API_KEY not found. Summaries will fail.");
+  }
+} catch (e) {
+  console.error("[Summary] Failed to initialize Gemini:", e);
+}
 
 const DEV_USER_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -18,22 +31,22 @@ async function analyzeUserBehavior(userId: string, messages: any[]): Promise<{
   vulnerabilityLevel: string;
 }> {
   const userMessages = messages.filter(m => m.role === 'user');
-  
+
   // Calculate message statistics
   const totalLength = userMessages.reduce((sum, m) => sum + (m.text?.length || 0), 0);
   const avgMessageLength = userMessages.length > 0 ? Math.round(totalLength / userMessages.length) : 0;
-  
+
   // Detect Hinglish usage (Hindi + English mix)
   const hinglishPatterns = /\b(kya|hai|hoon|mujhe|tumhe|pyaar|dil|zindagi|yaar|baat|achha|theek|nahi|aur|kyun|kaise|kaisa|kaisi|bohot|bahut|accha|matlab|sochta|sochti|lagta|lagti|pata|samajh|dost|raat|din|kal|aaj|abhi|kabhi|hamesha|sapna|khush|dukhi|pareshan|tension|feelings|relationship)\b/gi;
   const hinglishUsage = userMessages.some(m => hinglishPatterns.test(m.text || ''));
-  
+
   // Detect questions (curiosity/engagement)
-  const questionMessages = userMessages.filter(m => 
-    (m.text || '').includes('?') || 
+  const questionMessages = userMessages.filter(m =>
+    (m.text || '').includes('?') ||
     /\b(kya|kyun|kaise|kaisa|kaisi|kab|kahan|how|what|why|when|where|who)\b/i.test(m.text || '')
   );
   const questionRatio = userMessages.length > 0 ? questionMessages.length / userMessages.length : 0;
-  
+
   // Detect emotional patterns
   const emotionalKeywords = {
     openness: /\b(feel|feeling|emotions|honestly|truth|open|share|trust|vulnerable|confession|admit)\b/gi,
@@ -43,17 +56,17 @@ async function analyzeUserBehavior(userId: string, messages: any[]): Promise<{
     happiness: /\b(happy|joy|excited|amazing|wonderful|great|awesome|khush|mast)\b/gi,
     frustration: /\b(frustrated|annoyed|angry|upset|mad|irritated|bothered)\b/gi
   };
-  
+
   const emotionalPatterns: string[] = [];
   const allUserText = userMessages.map(m => m.text || '').join(' ');
-  
+
   if (emotionalKeywords.openness.test(allUserText)) emotionalPatterns.push('Emotionally open');
   if (emotionalKeywords.affection.test(allUserText)) emotionalPatterns.push('Affectionate');
   if (emotionalKeywords.anxiety.test(allUserText)) emotionalPatterns.push('Seeking reassurance');
   if (emotionalKeywords.loneliness.test(allUserText)) emotionalPatterns.push('Values companionship');
   if (emotionalKeywords.happiness.test(allUserText)) emotionalPatterns.push('Positive outlook');
   if (emotionalKeywords.frustration.test(allUserText)) emotionalPatterns.push('Expressive about concerns');
-  
+
   // Detect love language signals
   const loveLanguagePatterns = {
     wordsOfAffirmation: /\b(appreciate|compliment|proud|support|encourage|believe|thank|grateful|praise|acknowledge)\b/gi,
@@ -62,7 +75,7 @@ async function analyzeUserBehavior(userId: string, messages: any[]): Promise<{
     physicalTouch: /\b(hug|touch|hold|close|cuddle|embrace|physical|warm)\b/gi,
     receivingGifts: /\b(gift|surprise|present|buy|give|special|thoughtful|remember)\b/gi
   };
-  
+
   const loveLanguageSignals = {
     wordsOfAffirmation: (allUserText.match(loveLanguagePatterns.wordsOfAffirmation) || []).length,
     qualityTime: (allUserText.match(loveLanguagePatterns.qualityTime) || []).length,
@@ -70,7 +83,7 @@ async function analyzeUserBehavior(userId: string, messages: any[]): Promise<{
     physicalTouch: (allUserText.match(loveLanguagePatterns.physicalTouch) || []).length,
     receivingGifts: (allUserText.match(loveLanguagePatterns.receivingGifts) || []).length
   };
-  
+
   // Detect topic interests
   const topicPatterns = {
     career: /\b(work|job|career|office|boss|colleague|professional|business)\b/gi,
@@ -80,7 +93,7 @@ async function analyzeUserBehavior(userId: string, messages: any[]): Promise<{
     selfGrowth: /\b(improve|grow|learn|better|change|develop|goal|dream|aspiration)\b/gi,
     mentalHealth: /\b(stress|anxiety|depression|mental|therapy|peace|calm|meditat)\b/gi
   };
-  
+
   const topicInterests: string[] = [];
   if (topicPatterns.career.test(allUserText)) topicInterests.push('Career & Work');
   if (topicPatterns.family.test(allUserText)) topicInterests.push('Family');
@@ -88,28 +101,28 @@ async function analyzeUserBehavior(userId: string, messages: any[]): Promise<{
   if (topicPatterns.romance.test(allUserText)) topicInterests.push('Romance & Dating');
   if (topicPatterns.selfGrowth.test(allUserText)) topicInterests.push('Personal Growth');
   if (topicPatterns.mentalHealth.test(allUserText)) topicInterests.push('Mental Wellness');
-  
+
   // Determine communication style
   let communicationStyle = 'Friendly';
   if (avgMessageLength > 100) communicationStyle = 'Detailed & Expressive';
   else if (avgMessageLength > 50) communicationStyle = 'Thoughtful & Balanced';
   else if (avgMessageLength < 20) communicationStyle = 'Brief & Direct';
-  
+
   if (questionRatio > 0.4) communicationStyle += ', Curious';
   if (hinglishUsage) communicationStyle += ', Culturally connected';
-  
+
   // Determine engagement level
   let engagementLevel = 'Moderate';
   if (userMessages.length > 50) engagementLevel = 'Highly Engaged';
   else if (userMessages.length > 20) engagementLevel = 'Active';
   else if (userMessages.length < 10) engagementLevel = 'Getting Started';
-  
+
   // Determine vulnerability level
   let vulnerabilityLevel = 'low';
   const vulnerabilityScore = emotionalPatterns.length;
   if (vulnerabilityScore >= 4) vulnerabilityLevel = 'high';
   else if (vulnerabilityScore >= 2) vulnerabilityLevel = 'medium';
-  
+
   return {
     emotionalPatterns,
     communicationStyle,
@@ -126,34 +139,34 @@ async function analyzeUserBehavior(userId: string, messages: any[]): Promise<{
 // Calculate confidence score based on data quality
 function calculateConfidenceScore(messageCount: number, behaviorAnalysis: any): number {
   let confidence = 0.25; // Base confidence
-  
+
   // More messages = higher confidence
   if (messageCount >= 100) confidence += 0.35;
   else if (messageCount >= 50) confidence += 0.25;
   else if (messageCount >= 20) confidence += 0.15;
   else if (messageCount >= 10) confidence += 0.08;
-  
+
   // Emotional patterns detected = better understanding
   confidence += Math.min(0.15, behaviorAnalysis.emotionalPatterns.length * 0.03);
-  
+
   // Topic diversity = richer profile
   confidence += Math.min(0.1, behaviorAnalysis.topicInterests.length * 0.02);
-  
+
   // Vulnerability shown = deeper connection
   if (behaviorAnalysis.vulnerabilityLevel === 'high') confidence += 0.1;
   else if (behaviorAnalysis.vulnerabilityLevel === 'medium') confidence += 0.05;
-  
+
   // Cap at 0.95 (never 100% certain)
   return Math.min(0.95, Math.max(0.25, confidence));
 }
 
 // Determine primary love language from signals
 function determineLoveLanguage(signals: Record<string, number>): string {
-  const sorted = Object.entries(signals).sort(([,a], [,b]) => b - a);
+  const sorted = Object.entries(signals).sort(([, a], [, b]) => b - a);
   const topSignal = sorted[0];
-  
+
   if (!topSignal || topSignal[1] === 0) return "Quality Time";
-  
+
   const languageMap: Record<string, string> = {
     wordsOfAffirmation: "Words of Affirmation",
     qualityTime: "Quality Time",
@@ -161,14 +174,14 @@ function determineLoveLanguage(signals: Record<string, number>): string {
     physicalTouch: "Physical Touch",
     receivingGifts: "Receiving Gifts"
   };
-  
+
   return languageMap[topSignal[0]] || "Quality Time";
 }
 
 // Parse traits to ensure they have proper format
 function parseTraits(traits: any[]): string[] {
   if (!Array.isArray(traits)) return [];
-  
+
   return traits.slice(0, 3).map(trait => {
     if (typeof trait === 'object' && trait !== null) {
       const name = trait.name || trait.trait || '';
@@ -178,12 +191,12 @@ function parseTraits(traits: any[]): string[] {
       }
       return name || String(trait);
     }
-    
+
     if (typeof trait === 'string') {
       if (trait.includes(' - ')) return trait;
       return trait.trim();
     }
-    
+
     return String(trait);
   }).filter(t => t.length > 0);
 }
@@ -220,9 +233,9 @@ async function generateSummaryFromChats(userId: string): Promise<{
   // Analyze user behavior first
   const behaviorAnalysis = await analyzeUserBehavior(userId, messages);
   console.log("[generateSummaryFromChats] Behavior analysis:", JSON.stringify(behaviorAnalysis, null, 2));
-  
+
   // Persist behavior analytics to Supabase (fire and forget)
-  updateBehaviorAnalytics(userId, behaviorAnalysis).catch(err => 
+  updateBehaviorAnalytics(userId, behaviorAnalysis).catch(err =>
     console.log("[generateSummaryFromChats] Behavior analytics update skipped:", err.message)
   );
 
@@ -299,7 +312,7 @@ IMPORTANT:
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
-    
+
     // Parse JSON from response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -307,27 +320,27 @@ IMPORTANT:
       return null;
     }
     const summary = JSON.parse(jsonMatch[0]);
-    
+
     // Calculate confidence based on actual data quality
     const confidenceScore = calculateConfidenceScore(messages.length, behaviorAnalysis);
-    
+
     // Use behavior-derived love language as fallback
     const behaviorLoveLanguage = determineLoveLanguage(behaviorAnalysis.loveLanguageSignals);
-    
+
     // Parse and validate traits
     const parsedTraits = parseTraits(summary.top3TraitsYouValue);
-    const validTraits = parsedTraits.length >= 3 
-      ? parsedTraits 
+    const validTraits = parsedTraits.length >= 3
+      ? parsedTraits
       : ["Emotional understanding", "Good communication", "Mutual respect"];
-    
+
     return {
       partnerTypeOneLiner: summary.partnerTypeOneLiner || "You connect best with someone warm and emotionally available who values genuine connection.",
       top3TraitsYouValue: validTraits,
-      whatYouMightWorkOn: Array.isArray(summary.whatYouMightWorkOn) 
-        ? summary.whatYouMightWorkOn.slice(0, 3) 
+      whatYouMightWorkOn: Array.isArray(summary.whatYouMightWorkOn)
+        ? summary.whatYouMightWorkOn.slice(0, 3)
         : ["Being more open about feelings", "Expressing needs clearly"],
-      nextTimeFocus: Array.isArray(summary.nextTimeFocus) 
-        ? summary.nextTimeFocus.slice(0, 3) 
+      nextTimeFocus: Array.isArray(summary.nextTimeFocus)
+        ? summary.nextTimeFocus.slice(0, 3)
         : ["Love Language", "Communication Style", "Relationship Goals"],
       loveLanguageGuess: summary.loveLanguageGuess || behaviorLoveLanguage,
       communicationFit: summary.communicationFit || behaviorAnalysis.communicationStyle,
@@ -342,7 +355,7 @@ IMPORTANT:
 // Update behavior analytics in Supabase
 async function updateBehaviorAnalytics(userId: string, behaviorData: any): Promise<void> {
   if (!isSupabaseConfigured) return;
-  
+
   try {
     const { error } = await supabase
       .from("user_behavior_analytics")
@@ -362,7 +375,7 @@ async function updateBehaviorAnalytics(userId: string, behaviorData: any): Promi
         last_interaction_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }, { onConflict: 'user_id' });
-    
+
     if (error) {
       console.log("[updateBehaviorAnalytics] Note: Behavior table may not exist yet:", error.message);
     }
@@ -379,7 +392,7 @@ router.post("/api/summary/update", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Database not configured" });
     }
     const summaryData = req.body;
-    
+
     const { error: upsertError } = await supabase
       .from("user_summary_latest")
       .upsert({
@@ -412,12 +425,12 @@ router.post("/api/summary/generate", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Database not configured" });
     }
     console.log("[/api/summary/generate] Generating summary for user:", userId);
-    
+
     const generatedSummary = await generateSummaryFromChats(userId);
-    
+
     if (!generatedSummary) {
-      return res.status(400).json({ 
-        error: "Could not generate summary. Need more conversation history." 
+      return res.status(400).json({
+        error: "Could not generate summary. Need more conversation history."
       });
     }
     // Save to user_summary_latest table
@@ -439,7 +452,7 @@ router.post("/api/summary/generate", async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Failed to save summary" });
     }
     console.log("[/api/summary/generate] Summary generated and saved successfully");
-    
+
     res.json({
       success: true,
       summary: generatedSummary
@@ -501,7 +514,7 @@ router.get("/api/summary/latest", async (req: Request, res: Response) => {
         if (messageCount && messageCount >= 4) {
           console.log("[/api/summary/latest] Auto-generating summary for user:", userId);
           const generatedSummary = await generateSummaryFromChats(userId);
-          
+
           if (generatedSummary) {
             // Save to database
             await supabase
@@ -632,8 +645,8 @@ router.get("/api/analytics", async (req: Request, res: Response) => {
       engagement: {
         totalUsers: 1,
         activeUsers7d: 1,
-        avgMessagesPerSession: chatSessions.length > 0 
-          ? Math.round((usage?.total_messages || 0) / chatSessions.length) 
+        avgMessagesPerSession: chatSessions.length > 0
+          ? Math.round((usage?.total_messages || 0) / chatSessions.length)
           : 0,
         totalMessages: usage?.total_messages || 0,
         voiceCallSessions: callSessions.length,

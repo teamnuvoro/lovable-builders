@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabase, isSupabaseConfigured } from '../supabase';
-import { Vapi } from "@vapi-ai/server-sdk";
+// @ts-ignore
+import Vapi from "@vapi-ai/server-sdk";
 
 const router = Router();
 

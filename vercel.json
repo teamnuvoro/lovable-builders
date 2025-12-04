@@ -1,0 +1,7 @@
+{
+  "buildCommand": "cd riya-project-full && npm run build",
+  "outputDirectory": "riya-project-full/dist/public",
+  "installCommand": "cd riya-project-full && npm install",
+  "framework": null
+}
+

@@ -19,6 +19,24 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 // Authentication routes (OTP-based signup/login)
+// Health check endpoint to verify environment variables
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    env: {
+      NODE_ENV: process.env.NODE_ENV,
+      SUPABASE_URL: !!process.env.SUPABASE_URL,
+      SUPABASE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      GROQ_KEY: !!process.env.GROQ_API_KEY,
+      TWILIO_SID: !!process.env.TWILIO_ACCOUNT_SID,
+      VAPI_KEY: !!process.env.VAPI_PRIVATE_KEY,
+      CASHFREE_ID: !!process.env.CASHFREE_APP_ID,
+      AMPLITUDE_KEY: !!process.env.VITE_AMPLITUDE_API_KEY, // Check if server sees this (it might not, but client should)
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.use(authRoutes);
 
 // Supabase API routes (user, sessions, messages, etc.)

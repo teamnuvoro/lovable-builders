@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { setupVite, serveStatic, log } from "./vite";
 import { Server } from "http";
+import { ensureSecretsLoaded } from "./secrets";
 import chatRoutes from "./routes/chat";
 import supabaseApiRoutes from "./routes/supabase-api";
 import callRoutes from "./routes/call";
@@ -15,6 +16,7 @@ import messagesHistoryRoutes from "./routes/messages-history";
 const app = express();
 
 // Middleware
+app.use(ensureSecretsLoaded);
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 

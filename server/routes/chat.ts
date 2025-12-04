@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { supabase, isSupabaseConfigured, PERSONA_CONFIGS, type PersonaType } from "../supabase";
 import { RIYA_BASE_PROMPT, FREE_MESSAGE_LIMIT, PAYWALL_MESSAGE } from "../prompts";
+import Groq from "groq-sdk";
 
 const router = Router();
 
@@ -337,40 +338,23 @@ router.post("/api/chat", async (req: Request, res: Response) => {
       }
     }
 
-    // Check Groq API key - try env first, then// Initialize Groq client
+    // Initialize Groq client
     let groq: Groq | null = null;
-    try {
-      if (process.env.GROQ_API_KEY) {
-        groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-      } else {
-        console.warn("[Groq] GROQ_API_KEY not found. Chat will fail.");
-      }
-    } catch (e) {
-      console.error("[Groq] Failed to initialize:", e);
-    }
+    const apiKey = process.env.GROQ_API_KEY;
 
-    // If not in env, try to fetch from Supabase config table (if exists)
-    if (!groqApiKey && isSupabaseConfigured) {
+    if (apiKey) {
       try {
-        const { data: config } = await supabase
-          .from('app_config')
-          .select('value')
-          .eq('key', 'GROQ_API_KEY')
-          .single();
-
-        if (config?.value) {
-          groqApiKey = config.value;
-          console.log("[Chat] Retrieved GROQ_API_KEY from Supabase");
-        }
-      } catch (error) {
-        // Config table might not exist, that's okay
-        console.log("[Chat] Could not fetch GROQ_API_KEY from Supabase config");
+        groq = new Groq({ apiKey });
+      } catch (e) {
+        console.error("[Groq] Failed to initialize:", e);
       }
+    } else {
+      console.warn("[Groq] GROQ_API_KEY not found in env.");
     }
 
-    if (!groqApiKey || groqApiKey === 'your-groq-api-key-here') {
-      console.error("[Chat] GROQ_API_KEY not configured");
-      return res.status(500).json({ error: "AI service not configured. Please set GROQ_API_KEY in .env or Supabase app_config table." });
+    if (!groq || !apiKey) {
+      console.error("[Chat] Groq service not configured");
+      return res.status(500).json({ error: "AI service not configured. Please check server logs." });
     }
 
     // Build system prompt with persona
@@ -380,7 +364,7 @@ router.post("/api/chat", async (req: Request, res: Response) => {
     const groqResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${groqApiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

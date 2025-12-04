@@ -74,7 +74,7 @@ app.use(async (req, res, next) => {
 });
 
 app.use(supabaseApiRoutes);
-app.use(chatRoutes);
+app.use("/api", chatRoutes);
 app.use(callRoutes);
 app.use(summaryRoutes);
 app.use("/api/user-summary", userSummaryRoutes);

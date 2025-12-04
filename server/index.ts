@@ -4,6 +4,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { Server } from "http";
 import chatRoutes from "./routes/chat";
 import supabaseApiRoutes from "./routes/supabase-api";
+import authRoutes from "./routes/auth";
 
 const app = express();
 
@@ -13,6 +14,9 @@ app.use(express.urlencoded({ extended: false }));
 
 // Supabase API routes (user, sessions, messages, etc.)
 app.use(supabaseApiRoutes);
+
+// Auth routes
+app.use(authRoutes);
 
 // Chat routes (Groq AI)
 app.use(chatRoutes);
@@ -34,14 +38,14 @@ app.get("/api/payment/config", (_req, res) => {
 app.post("/api/payment/create-order", async (req, res) => {
   try {
     const { planType } = req.body;
-    
+
     // Check if Cashfree credentials are configured
     if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY) {
-      return res.status(503).json({ 
-        error: "Payment service not configured. Please set up Cashfree credentials." 
+      return res.status(503).json({
+        error: "Payment service not configured. Please set up Cashfree credentials."
       });
     }
-    
+
     // TODO: Implement Cashfree order creation
     res.status(503).json({ error: "Payment integration pending. Contact support." });
   } catch (error: any) {
@@ -94,27 +98,33 @@ app.get("/api/auth/session", async (req, res) => {
   }
 });
 
-(async () => {
-  console.log("[Server] Starting server with Supabase integration...");
-  
-  const server = new Server(app);
+// Export app for Vercel
+export default app;
 
-  // Setup Vite or serve static files
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
+// Only start server if run directly (not imported)
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  (async () => {
+    console.log("[Server] Starting server with Supabase integration...");
 
-  const port = parseInt(process.env.PORT || '5000', 10);
-  
-  server.listen({
-    port,
-    host: "0.0.0.0",
-  }, () => {
-    log(`🚀 Server running on port ${port}`);
-    console.log(`[Server] ✅ Frontend server listening on port ${port}`);
-    console.log(`[Server] 🔄 Supabase API routes integrated`);
-    console.log(`[Server] 🔄 Chat API routes integrated`);
-  });
-})();
+    const server = new Server(app);
+
+    // Setup Vite or serve static files
+    if (app.get("env") === "development") {
+      await setupVite(app, server);
+    } else {
+      serveStatic(app);
+    }
+
+    const port = parseInt(process.env.PORT || '5000', 10);
+
+    server.listen({
+      port,
+      host: "0.0.0.0",
+    }, () => {
+      log(`🚀 Server running on port ${port}`);
+      console.log(`[Server] ✅ Frontend server listening on port ${port}`);
+      console.log(`[Server] 🔄 Supabase API routes integrated`);
+      console.log(`[Server] 🔄 Chat API routes integrated`);
+    });
+  })();
+}

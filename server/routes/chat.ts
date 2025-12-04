@@ -205,15 +205,58 @@ router.post("/api/chat", async (req: Request, res: Response) => {
 
 // Keep the session and messages endpoints as they are useful
 router.post("/api/session", async (req: Request, res: Response) => {
-  // Simplified session endpoint
-  const userId = DEV_USER_ID;
-  const sessionId = crypto.randomUUID();
-  res.json({
-    id: sessionId,
-    user_id: userId,
-    type: 'chat',
-    started_at: new Date().toISOString()
-  });
+  try {
+    const { userId } = req.body;
+    let finalUserId = userId;
+
+    if (!finalUserId) {
+      // If no user ID provided, try to get dev user or generate one
+      const user = await getOrCreateDevUser();
+      finalUserId = user.id;
+    }
+
+    // Check for existing active session
+    if (isSupabaseConfigured) {
+      const { data: existingSessions } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('user_id', finalUserId)
+        .is('ended_at', null)
+        .order('started_at', { ascending: false })
+        .limit(1);
+
+      if (existingSessions && existingSessions.length > 0) {
+        return res.json(existingSessions[0]);
+      }
+
+      // Create new session
+      const { data: session, error } = await supabase
+        .from('sessions')
+        .insert({
+          user_id: finalUserId,
+          type: 'chat',
+          started_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (!error && session) {
+        return res.json(session);
+      }
+    }
+
+    // Fallback or Dev mode
+    const sessionId = crypto.randomUUID();
+    res.json({
+      id: sessionId,
+      user_id: finalUserId,
+      type: 'chat',
+      started_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("[Session] Error:", error);
+    res.status(500).json({ error: "Failed to create session" });
+  }
 });
 
 router.get("/api/messages", async (req: Request, res: Response) => {

@@ -65,12 +65,17 @@ export default function ChatPage() {
   const [voiceModeEnabled, setVoiceModeEnabled] = useState(false);
 
   const { data: session, isLoading: isSessionLoading } = useQuery<Session>({
-    queryKey: ["session"],
+    queryKey: ["session", user?.id],
     queryFn: async () => {
-      const res = await fetch("/api/session", { method: "POST" });
+      const res = await fetch("/api/session", {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user?.id })
+      });
       if (!res.ok) throw new Error("Failed to get session");
       return res.json();
-    }
+    },
+    enabled: !!user?.id // Only fetch session when user is available
   });
 
   const { data: messages = [], isLoading: isMessagesLoading } = useQuery<Message[]>({
@@ -96,7 +101,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (messages.length > 0 && optimisticMessages.length > 0) {
       const serverMessageContents = new Set(
-        messages.map(m => m.content.trim().toLowerCase())
+        messages.map(m => (m.content || m.text || '').trim().toLowerCase())
       );
 
       setOptimisticMessages(prev =>
@@ -267,7 +272,7 @@ export default function ChatPage() {
     });
   };
 
-  const serverMessageIds = new Set(messages.map(m => m.content.trim().toLowerCase()));
+  const serverMessageIds = new Set(messages.map(m => (m.content || m.text || '').trim().toLowerCase()));
   const filteredOptimistic = optimisticMessages.filter(
     optMsg => !serverMessageIds.has(optMsg.content.trim().toLowerCase())
   );

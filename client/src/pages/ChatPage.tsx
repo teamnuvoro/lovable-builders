@@ -14,9 +14,9 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { Skeleton } from "@/components/ui/skeleton";
 import { analytics } from "@/lib/analytics";
 import { useLocation } from "wouter";
-import { 
-  trackChatOpened, 
-  trackMessageSent, 
+import {
+  trackChatOpened,
+  trackMessageSent,
   trackMessageReceived,
   trackSessionStarted,
   trackMessageLimitHit,
@@ -39,7 +39,7 @@ export default function ChatPage() {
   const [streamingMessage, setStreamingMessage] = useState<string>("");
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [amplitudePasswordOpen, setAmplitudePasswordOpen] = useState(false);
-  
+
   // Exit intent detection - triggers when user tries to leave
   const { showModal: showExitModal, closeModal: closeExitModal } = useExitIntent({
     enabled: true,
@@ -98,14 +98,14 @@ export default function ChatPage() {
       const serverMessageContents = new Set(
         messages.map(m => m.content.trim().toLowerCase())
       );
-      
-      setOptimisticMessages(prev => 
-        prev.filter(optMsg => 
+
+      setOptimisticMessages(prev =>
+        prev.filter(optMsg =>
           !serverMessageContents.has(optMsg.content.trim().toLowerCase())
         )
       );
     }
-    
+
     // Clear streaming message if we have a matching AI message in the list
     if (streamingMessage && messages.length > 0) {
       const streamingText = streamingMessage.trim().toLowerCase();
@@ -119,7 +119,7 @@ export default function ChatPage() {
           streamingText.includes(msgText.substring(0, Math.min(30, msgText.length)))
         );
       });
-      
+
       if (hasMatchingMessage) {
         console.log('[Chat] Found matching message in list, clearing streaming message');
         setStreamingMessage("");
@@ -168,7 +168,7 @@ export default function ChatPage() {
 
   const addOptimisticMessage = useCallback((content: string) => {
     if (!session) return null;
-    
+
     const optimisticMsg: OptimisticMessage = {
       id: generateTempId(),
       content,
@@ -177,10 +177,10 @@ export default function ChatPage() {
       createdAt: new Date(),
       isOptimistic: true,
     };
-    
+
     setOptimisticMessages(prev => [...prev, optimisticMsg]);
     setFailedMessage("");
-    
+
     return optimisticMsg;
   }, [session]);
 
@@ -197,16 +197,13 @@ export default function ChatPage() {
       setIsTyping(true);
       setStreamingMessage("");
 
-      abortControllerRef.current = new AbortController();
-
       try {
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ content, sessionId: session.id }),
-          signal: abortControllerRef.current.signal,
+          body: JSON.stringify({ content, sessionId: session.id, userId: user?.id }),
         });
 
         if (response.status === 402) {
@@ -221,124 +218,27 @@ export default function ChatPage() {
           throw new Error("Failed to send message");
         }
 
-        const contentType = response.headers.get("content-type");
-        if (contentType?.includes("application/json")) {
-          const data = await response.json();
-          if (data.limitExceeded) {
-            setIsTyping(false);
-            removeOptimisticMessage(optimisticId);
-            setPaywallOpen(true);
-            queryClient.invalidateQueries({ queryKey: ["/api/user/usage"] });
-            return { success: false, reason: 'limit' };
-          }
+        const data = await response.json();
+
+        if (data.error) {
+          throw new Error(data.error);
         }
 
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-
-        if (!reader) {
-          throw new Error("No response body");
-        }
-
-        let accumulatedMessage = "";
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-
-          if (done) {
-            setIsTyping(false);
-            // Keep streaming message visible until actual message appears
-            // It will be cleared when messages are refetched
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-
-                if (data.error) {
-                  throw new Error(data.error);
-                }
-
-                if (data.done) {
-                  setIsTyping(false);
-                  
-                  // If we have a full response in the done signal, keep it visible
-                  if (data.fullResponse && accumulatedMessage) {
-                    // Keep the streaming message visible - it will be replaced when fetched
-                    console.log('[Chat] Stream complete, keeping message visible');
-                  }
-                  
-                  // Wait longer before invalidating to ensure message is saved to database
-                  if (session?.id) {
-                    setTimeout(() => {
-                      queryClient.invalidateQueries({ queryKey: ["messages", session.id] });
-                      // Clear streaming message after a longer delay to ensure it's replaced
-                      setTimeout(() => {
-                        // Only clear if we still have the streaming message (message should be in list by now)
-                        setStreamingMessage(prev => {
-                          if (prev) {
-                            console.log('[Chat] Clearing streaming message after refetch');
-                          }
-                          return "";
-                        });
-                      }, 1000);
-                    }, 1000);
-                  } else {
-                    // No session - clear immediately
-                    setStreamingMessage("");
-                  }
-                  
-                  queryClient.invalidateQueries({ queryKey: ["/api/user/usage"] });
-                  return { success: true };
-                }
-
-                if (data.content) {
-                  accumulatedMessage += data.content;
-                  setStreamingMessage(accumulatedMessage);
-                }
-              } catch (parseError) {
-                console.error("Error parsing SSE data:", parseError);
-              }
-            }
-          }
-        }
-
-        if (session) {
-          // Wait longer for the message to be saved to database
-          setTimeout(() => {
-            queryClient.invalidateQueries({ queryKey: ["messages", session.id] });
-            // Don't clear streaming message here - let the useEffect handle it
-            // when it detects the matching message in the list
-          }, 1500);
-        } else {
-          // No session - keep streaming message visible for a bit
-          setTimeout(() => setStreamingMessage(""), 2000);
-        }
+        // Update messages with the real response
+        queryClient.invalidateQueries({ queryKey: ["messages", session.id] });
         queryClient.invalidateQueries({ queryKey: ["/api/user/usage"] });
-        return { success: true };
+
+        return { success: true, reply: data.reply };
+
       } catch (error: any) {
-        if (error.name === 'AbortError') {
-          console.log("Stream aborted by user");
-          return { success: false, reason: 'aborted' };
-        } else {
-          throw error;
-        }
+        console.error("Chat error:", error);
+        throw error;
       } finally {
         setIsTyping(false);
-        setStreamingMessage("");
       }
     },
     onError: (error, variables) => {
       setIsTyping(false);
-      setStreamingMessage("");
       removeOptimisticMessage(variables.optimisticId);
       setFailedMessage(variables.content);
       toast({
@@ -346,7 +246,6 @@ export default function ChatPage() {
         description: "Please try again.",
         variant: "destructive",
       });
-      console.error("Chat error:", error);
     },
   });
 
@@ -356,15 +255,15 @@ export default function ChatPage() {
 
     // Track message sent
     trackMessageSent(content.length, messages.length + 1);
-    
+
     analytics.track("message_sent", {
       length: content.length,
       voiceMode: voiceModeEnabled
     });
-    
-    sendMessageMutation.mutate({ 
-      content, 
-      optimisticId: optimisticMsg.id 
+
+    sendMessageMutation.mutate({
+      content,
+      optimisticId: optimisticMsg.id
     });
   };
 
@@ -451,8 +350,8 @@ export default function ChatPage() {
 
       {/* Scrollable Messages Area - Takes full height minus input */}
       <div className="flex-1 min-h-0 w-full overflow-hidden">
-        <ChatMessages 
-          messages={displayMessages as Message[]} 
+        <ChatMessages
+          messages={displayMessages as Message[]}
           isLoading={isMessagesLoading}
           isMobile={isMobile}
           isTyping={isTyping}
@@ -461,7 +360,7 @@ export default function ChatPage() {
 
       {/* Fixed Input at Bottom - Responsive */}
       <div className="flex-shrink-0 w-full">
-        <ChatInput 
+        <ChatInput
           onSendMessage={handleSendMessage}
           isLoading={sendMessageMutation.isPending || isTyping}
           disabled={isLimitReached}

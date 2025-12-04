@@ -57,7 +57,8 @@ app.get("/api/health", (req, res) => {
     });
 });
 
-app.use(authRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/auth", authRoutes);
 app.use(supabaseApiRoutes);
 app.use(chatRoutes);
 app.use(callRoutes);

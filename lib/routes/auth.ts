@@ -49,8 +49,8 @@ async function sendOTPViaSMS(phoneNumber: string, otp: string): Promise<boolean>
     }
 }
 
-// POST /api/auth/send-otp - Send OTP to phone number
-router.post('/api/auth/send-otp', async (req: Request, res: Response) => {
+// POST /send-otp - Send OTP to phone number
+router.post('/send-otp', async (req: Request, res: Response) => {
     try {
         const { phoneNumber, email, name } = req.body;
 
@@ -128,8 +128,8 @@ router.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     }
 });
 
-// POST /api/auth/verify-otp - Verify OTP and create user
-router.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
+// POST /verify-otp - Verify OTP and create user
+router.post('/verify-otp', async (req: Request, res: Response) => {
     try {
         const { phoneNumber, otp } = req.body;
 
@@ -227,8 +227,8 @@ router.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
     }
 });
 
-// POST /api/auth/login - Login with phone number (send OTP)
-router.post('/api/auth/login', async (req: Request, res: Response) => {
+// POST /login - Login with phone number (send OTP)
+router.post('/login', async (req: Request, res: Response) => {
     try {
         const { phoneNumber } = req.body;
 
@@ -297,8 +297,8 @@ router.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 });
 
-// POST /api/auth/verify-login-otp - Verify OTP for login
-router.post('/api/auth/verify-login-otp', async (req: Request, res: Response) => {
+// POST /verify-login-otp - Verify OTP for login
+router.post('/verify-login-otp', async (req: Request, res: Response) => {
     try {
         const { phoneNumber, otp } = req.body;
 
@@ -368,8 +368,8 @@ router.post('/api/auth/verify-login-otp', async (req: Request, res: Response) =>
     }
 });
 
-// GET /api/auth/check - Check if user is authenticated (stub for now)
-router.get('/api/auth/check', async (req: Request, res: Response) => {
+// GET /check - Check if user is authenticated (stub for now)
+router.get('/check', async (req: Request, res: Response) => {
     // In production, verify JWT token from Authorization header
     const authHeader = req.headers.authorization;
 
@@ -381,8 +381,8 @@ router.get('/api/auth/check', async (req: Request, res: Response) => {
     res.json({ authenticated: true });
 });
 
-// POST /api/auth/logout - Logout user
-router.post('/api/auth/logout', async (req: Request, res: Response) => {
+// POST /logout - Logout user
+router.post('/logout', async (req: Request, res: Response) => {
     try {
         // Clear session
         if ((req as any).session) {

@@ -74,7 +74,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .single();
 
       if (error) {
-        console.error('Error fetching user profile:', error);
+        if (error.code === 'PGRST116') {
+          // Profile doesn't exist, create it
+          console.log('Profile missing, creating default profile for:', userId);
+
+          // Get phone from session if available
+          const { data: { session } } = await supabase.auth.getSession();
+          const phone = session?.user?.phone;
+
+          const newProfile = {
+            id: userId,
+            name: 'New User',
+            email: session?.user?.email || '',
+            phone_number: phone || '',
+            gender: 'prefer_not_to_say',
+            persona: 'sweet_supportive',
+            premium_user: false,
+            onboarding_complete: false,
+            updated_at: new Date().toISOString(),
+          };
+
+          const { data: createdProfile, error: createError } = await supabase
+            .from('users')
+            .upsert(newProfile)
+            .select()
+            .single();
+
+          if (createError) {
+            console.error('Failed to create default profile:', createError);
+          } else {
+            setUser(createdProfile as User);
+            // Initialize usage stats
+            await supabase.from('usage_stats').insert({
+              user_id: userId,
+              total_messages: 0,
+              total_call_seconds: 0
+            });
+          }
+        } else {
+          console.error('Error fetching user profile:', error);
+        }
       } else {
         setUser(data as User);
         // Identify in analytics

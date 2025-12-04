@@ -218,7 +218,7 @@ export default function LoginPage() {
             className="text-3xl sm:text-4xl font-bold text-[#9810fa] mb-2 relative"
             data-testid="text-login-title"
           >
-            {step === 'phone' ? 'Welcome Back!' : `Hi ${userName}!`}
+            {step === 'phone' ? 'Welcome Back!' : (userName ? `Hi ${userName}!` : 'Hi!')}
             <motion.span
               initial={{ opacity: 0, scale: 0.5, rotate: 0 }}
               animate={{ opacity: 1, scale: 1, rotate: [0, 15, -15, 0] }}

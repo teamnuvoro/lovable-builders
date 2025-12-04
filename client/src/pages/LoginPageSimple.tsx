@@ -9,7 +9,7 @@ export default function LoginPageSimple() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { login } = useAuth();
-  
+
   // State
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -18,10 +18,10 @@ export default function LoginPageSimple() {
   const [userName, setUserName] = useState("");
   const [devModeOTP, setDevModeOTP] = useState("");
 
-  // STEP 1: Send Login OTP
+  // STEP 1: Send Login OTP (or Direct Login)
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!phone) {
       toast({
         title: "Missing Phone",
@@ -32,7 +32,7 @@ export default function LoginPageSimple() {
     }
 
     setLoading(true);
-    
+
     try {
       let cleanPhone = phone.replace(/\s+/g, '');
       if (!cleanPhone.startsWith('+')) {
@@ -59,13 +59,31 @@ export default function LoginPageSimple() {
           setTimeout(() => setLocation('/signup'), 2000);
           return;
         }
-        throw new Error(data.error || "Failed to send OTP");
+        throw new Error(data.error || "Failed to login");
       }
 
+      // Check for Direct Login (No OTP)
+      if (data.directLogin && data.sessionToken) {
+        // Store session
+        localStorage.setItem('sessionToken', data.sessionToken);
+
+        // Update auth
+        login(data.user);
+
+        toast({
+          title: "Welcome Back! 🎉",
+          description: `Hi ${data.user.name}!`,
+        });
+
+        setTimeout(() => setLocation('/chat'), 1000);
+        return;
+      }
+
+      // Fallback to OTP flow (if server reverts)
       toast({
         title: "OTP Sent! 📱",
-        description: data.devMode 
-          ? `Dev Mode: OTP is ${data.otp}` 
+        description: data.devMode
+          ? `Dev Mode: OTP is ${data.otp}`
           : "Check your phone for the code",
         duration: 8000,
       });
@@ -90,10 +108,10 @@ export default function LoginPageSimple() {
   // STEP 2: Verify Login OTP
   const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     console.log('[LOGIN VERIFY] OTP Value:', otp);
     console.log('[LOGIN VERIFY] OTP Length:', otp.length);
-    
+
     if (otp.length !== 6) {
       toast({
         title: "Invalid OTP",
@@ -104,7 +122,7 @@ export default function LoginPageSimple() {
     }
 
     setLoading(true);
-    
+
     try {
       let cleanPhone = phone.replace(/\s+/g, '');
       if (!cleanPhone.startsWith('+')) {
@@ -140,7 +158,7 @@ export default function LoginPageSimple() {
       });
 
       setTimeout(() => setLocation('/chat'), 1500);
-      
+
     } catch (error: any) {
       toast({
         title: "Login Failed",
@@ -171,8 +189,8 @@ export default function LoginPageSimple() {
             <Sparkles className="inline-block w-6 h-6 ml-2 text-pink-500" />
           </h1>
           <p className="text-lg text-gray-600">
-            {step === 'phone' 
-              ? 'Login to continue with Riya' 
+            {step === 'phone'
+              ? 'Login to continue with Riya'
               : 'Enter the verification code'}
           </p>
         </div>

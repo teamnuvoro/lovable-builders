@@ -28,25 +28,9 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
       return res.status(400).json({ error: 'Invalid plan type' });
     }
 
-    // Initialize Cashfree
-    try {
-      if (process.env.CASHFREE_APP_ID && process.env.CASHFREE_SECRET_KEY) {
-        // Assuming Cashfree is imported or globally available, e.g., from 'cashfree-pg'
-        // This part of the code requires the Cashfree SDK to be imported and configured.
-        // For example: import { Cashfree } from 'cashfree-pg';
-        // If not imported, this will cause a runtime error.
-        (global as any).Cashfree.X.ClientId = process.env.CASHFREE_APP_ID;
-        (global as any).Cashfree.X.ClientSecret = process.env.CASHFREE_SECRET_KEY;
-        (global as any).Cashfree.X.Environment = process.env.CASHFREE_ENV === 'PRODUCTION'
-          ? (global as any).Cashfree.Environment.PRODUCTION
-          : (global as any).Cashfree.Environment.SANDBOX;
-      } else {
-        console.warn("[Cashfree] Credentials missing. Payments will fail.");
-      }
-    } catch (e) {
-      console.error("[Cashfree] Failed to initialize:", e);
-      // Depending on desired behavior, you might want to return an error here
-      // return res.status(500).json({ error: 'Payment service initialization failed' });
+    // Initialize Cashfree (handled in cashfree.ts)
+    if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY) {
+      console.warn("[Cashfree] Credentials missing. Payments will fail.");
     }
 
     // Get user info

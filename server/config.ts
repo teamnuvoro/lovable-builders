@@ -22,8 +22,8 @@ export function getCashfreePlanConfig() {
   return {
     currency: "INR",
     plans: {
-      daily: 19,
-      weekly: 49,
+      daily: 29,
+      weekly: 99,
     },
   };
 }

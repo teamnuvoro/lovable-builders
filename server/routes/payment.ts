@@ -146,9 +146,8 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
     }
 
     // Check payment status with Cashfree
-    const cashfreeBaseUrl = process.env.CASHFREE_MODE === 'production'
-      ? 'https://api.cashfree.com/pg'
-      : 'https://sandbox.cashfree.com/pg';
+    // Check payment status with Cashfree
+    const cashfreeBaseUrl = getCashfreeBaseUrl();
 
     const response = await fetch(`${cashfreeBaseUrl}/orders/${orderId}`, {
       method: 'GET',

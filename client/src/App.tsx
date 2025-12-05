@@ -24,9 +24,6 @@ import LoginPage from "@/pages/LoginPageSimple";
 import NotFound from "@/pages/not-found";
 import { analytics } from "@/lib/analytics";
 
-const authDisabled =
-  import.meta.env.VITE_DISABLE_AUTH?.toString().toLowerCase() === "true";
-
 function ProtectedRoute({ component: Component }: { component: () => JSX.Element }) {
   const { isAuthenticated, isLoading } = useAuth();
 

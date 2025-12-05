@@ -101,7 +101,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (messages.length > 0 && optimisticMessages.length > 0) {
       const serverMessageContents = new Set(
-        messages.map(m => (m.content || m.text || '').trim().toLowerCase())
+        messages.map(m => ((m as any).content || m.text || '').trim().toLowerCase())
       );
 
       setOptimisticMessages(prev =>
@@ -116,7 +116,7 @@ export default function ChatPage() {
       const streamingText = streamingMessage.trim().toLowerCase();
       const hasMatchingMessage = messages.some(msg => {
         if (msg.role !== 'ai') return false;
-        const msgText = (msg.content || msg.text || '').trim().toLowerCase();
+        const msgText = ((msg as any).content || msg.text || '').trim().toLowerCase();
         // Check if messages match (allowing for small differences)
         return msgText.length > 0 && (
           msgText === streamingText ||
@@ -272,7 +272,7 @@ export default function ChatPage() {
     });
   };
 
-  const serverMessageIds = new Set(messages.map(m => (m.content || m.text || '').trim().toLowerCase()));
+  const serverMessageIds = new Set(messages.map(m => ((m as any).content || m.text || '').trim().toLowerCase()));
   const filteredOptimistic = optimisticMessages.filter(
     optMsg => !serverMessageIds.has(optMsg.content.trim().toLowerCase())
   );
@@ -329,7 +329,6 @@ export default function ChatPage() {
           fontSize: '24px',
           zIndex: 9999,
           pointerEvents: 'auto',
-          animation: 'pulse 2s ease-in-out infinite',
         }}
         title="Open Amplitude Dashboard (Password Protected)"
         data-testid="amplitude-lock-button"
@@ -378,16 +377,7 @@ export default function ChatPage() {
       <PaywallSheet open={paywallOpen} onOpenChange={setPaywallOpen} />
 
       {/* Add CSS for pulse animation */}
-      <style>{`
-        @keyframes pulse {
-          0%, 100% {
-            box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7);
-          }
-          50% {
-            box-shadow: 0 0 0 15px rgba(102, 126, 234, 0);
-          }
-        }
-      `}</style>
+
     </div>
   );
 }

@@ -30,9 +30,6 @@ const authDisabled =
 function ProtectedRoute({ component: Component }: { component: () => JSX.Element }) {
   const { isAuthenticated, isLoading } = useAuth();
 
-  if (authDisabled) {
-    return <Component />;
-  }
 
   if (isLoading) {
     return (

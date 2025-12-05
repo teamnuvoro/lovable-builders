@@ -75,10 +75,16 @@ function Router() {
       {/* Landing/Auth Routes - No Sidebar */}
       <Route path="/">
         {() => {
+          const { isLoading } = useAuth();
+
+          if (isLoading) {
+            return <div className="flex h-screen w-full items-center justify-center bg-pink-50"></div>; // Or a spinner
+          }
+
           if (!isAuthenticated) return <LandingPage />;
+
           // Skip persona selection - Riya is default
           if (user && !user.onboarding_complete) {
-            // Set default persona to Riya if not set
             return <Redirect to="/chat" />;
           }
           return <Redirect to="/chat" />;

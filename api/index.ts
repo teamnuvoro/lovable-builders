@@ -131,7 +131,25 @@ app.get("/api/auth/session", async (req, res) => {
     }
 });
 
-// Catch-all for debugging 404s
+// Serve static files from the React app build directory
+import path from "path";
+const clientBuildPath = path.join(__dirname, "../client/dist");
+app.use(express.static(clientBuildPath));
+
+// For any other request, send back index.html (SPA routing)
+// BUT only if it's not an API request
+app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api")) {
+        return next();
+    }
+    res.sendFile(path.join(clientBuildPath, "index.html"), (err) => {
+        if (err) {
+            next();
+        }
+    });
+});
+
+// Catch-all for debugging 404s (API only)
 app.use("*", (req, res) => {
     console.log(`[404] ${req.method} ${req.originalUrl} - No route matched`);
     res.status(404).json({

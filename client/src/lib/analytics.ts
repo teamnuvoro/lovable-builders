@@ -5,28 +5,29 @@ const IS_DEV_ENV = window.location.hostname === 'localhost' || window.location.h
 
 // Suppress Amplitude console errors globally during development
 if (IS_DEV_ENV && typeof window !== 'undefined') {
-  const originalError = console.error;
-  const originalWarn = console.warn;
-  
-  console.error = (...args: any[]) => {
-    const message = args[0]?.toString?.() || '';
-    if (message.includes('Amplitude') || message.includes('Failed to fetch')) {
-      return; // Suppress Amplitude errors in dev
-    }
-    originalError(...args);
-  };
-  
-  console.warn = (...args: any[]) => {
-    const message = args[0]?.toString?.() || '';
-    if (message.includes('Amplitude') || message.includes('exceeded retry')) {
-      return; // Suppress Amplitude warnings in dev
-    }
-    originalWarn(...args);
-  };
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.error = (...args: any[]) => {
+        const message = args[0]?.toString?.() || '';
+        if (message.includes('Amplitude') || message.includes('Failed to fetch')) {
+            return; // Suppress Amplitude errors in dev
+        }
+        originalError(...args);
+    };
+
+    console.warn = (...args: any[]) => {
+        const message = args[0]?.toString?.() || '';
+        if (message.includes('Amplitude') || message.includes('exceeded retry')) {
+            return; // Suppress Amplitude warnings in dev
+        }
+        originalWarn(...args);
+    };
 }
 
 export const analytics = {
     initialize: () => {
+        return; // Amplitude disabled by user request
         // Only initialize if API key is explicitly provided
         if (!AMPLITUDE_API_KEY) {
             return;

@@ -8,7 +8,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { analytics } from "@/lib/analytics";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { SetupBanner } from '@/components/vapi/SetupBanner';
 import { isVapiConfigured } from '@/config/vapi-config';
 
 type CallStatus = 'idle' | 'connecting' | 'connected' | 'speaking' | 'listening' | 'ended';
@@ -87,7 +86,7 @@ export default function CallPage() {
   useEffect(() => {
     const initVapi = async () => {
       const publicKey = callConfig?.publicKey || import.meta.env.VITE_VAPI_PUBLIC_KEY;
-      
+
       if (!publicKey) {
         console.log('[CallPage] No Vapi public key available');
         setIsVapiReady(false);
@@ -98,7 +97,7 @@ export default function CallPage() {
         vapiRef.current = new Vapi(publicKey);
         setIsVapiReady(true);
         console.log('[CallPage] Vapi initialized successfully');
-      
+
         vapiRef.current.on('call-start', () => {
           setCallStatus('connected');
           setStatusText('Connected');
@@ -110,7 +109,7 @@ export default function CallPage() {
           setCallStatus('ended');
           setStatusText('Call ended');
           stopTimer();
-          
+
           const finalDuration = sessionDurationRef.current;
           if (callSessionIdRef.current && finalDuration > 0) {
             endCallMutation.mutate({
@@ -119,7 +118,7 @@ export default function CallPage() {
               endReason: 'vapi_ended'
             });
           }
-          
+
           setTimeout(() => {
             setCallStatus('idle');
             setStatusText('Tap to call Riya');
@@ -149,9 +148,9 @@ export default function CallPage() {
             const transcriptText = message.transcript;
             const role = message.role || 'user'; // 'user' or 'assistant'
             const entry = `[${role.toUpperCase()}]: ${transcriptText}`;
-            
+
             console.log('Transcript:', entry);
-            
+
             // Store transcript
             transcriptRef.current.push(entry);
             setCallTranscript(transcriptRef.current.join('\n'));
@@ -193,7 +192,7 @@ export default function CallPage() {
         const newSessionDuration = prev + 1;
         sessionDurationRef.current = newSessionDuration;
         const totalWithSession = totalUsedSeconds + newSessionDuration;
-        
+
         if (!userUsage?.premiumUser && totalWithSession >= FREE_CALL_LIMIT_SECONDS) {
           analytics.track("voice_call_ended", { duration: newSessionDuration, reason: "limit_reached" });
           setTimeout(() => {
@@ -212,7 +211,7 @@ export default function CallPage() {
           }, 0);
           return newSessionDuration;
         }
-        
+
         if (!userUsage?.premiumUser && totalWithSession === WARNING_THRESHOLD_SECONDS) {
           toast({
             title: "Time's running out...",
@@ -220,10 +219,10 @@ export default function CallPage() {
             duration: 5000,
           });
         }
-        
+
         return newSessionDuration;
-        });
-      }, 1000);
+      });
+    }, 1000);
   }, [userUsage, totalUsedSeconds, toast, endCallMutation]);
 
   const stopTimer = useCallback(() => {
@@ -249,8 +248,8 @@ export default function CallPage() {
     if (!isVapiReady || !vapiRef.current) {
       toast({
         title: 'Not Ready',
-        description: configLoading 
-          ? 'Loading voice calling configuration...' 
+        description: configLoading
+          ? 'Loading voice calling configuration...'
           : 'Voice calling is not available. Please check configuration.',
         variant: 'destructive',
       });
@@ -336,7 +335,7 @@ Always be warm, supportive, and make the user feel heard and valued.`
     console.log('🔴 END CALL BUTTON CLICKED - NUCLEAR SHUTDOWN!');
     console.log('Call status:', callStatus);
     console.log('Vapi ref exists:', !!vapiRef.current);
-    
+
     try {
       // STEP 1: STOP MICROPHONE IMMEDIATELY
       console.log('🎤 STOPPING MICROPHONE');
@@ -350,7 +349,7 @@ Always be warm, supportive, and make the user feel heard and valued.`
           audioStreamRef.current = null;
           console.log('✅ All audio tracks stopped');
         }
-        
+
         // Also try to get and stop any active media streams
         navigator.mediaDevices.getUserMedia({ audio: true, video: false })
           .then(stream => {
@@ -363,7 +362,7 @@ Always be warm, supportive, and make the user feel heard and valued.`
       } catch (micError) {
         console.log('Microphone stop error (continuing):', micError);
       }
-      
+
       // STEP 2: MUTE VAPI to stop audio output
       if (vapiRef.current) {
         console.log('⚡ MUTING VAPI AUDIO');
@@ -373,18 +372,18 @@ Always be warm, supportive, and make the user feel heard and valued.`
           console.log('Mute failed, continuing...');
         }
       }
-      
+
       // STEP 3: Stop timer
       stopTimer();
-      
+
       // STEP 4: Track analytics
       analytics.track("voice_call_ended", { duration: sessionDuration });
-      
+
       // STEP 5: Save to backend with transcript
       if (callSessionIdRef.current && sessionDuration > 0) {
         const fullTranscript = transcriptRef.current.join('\n');
         console.log('📝 Saving transcript:', fullTranscript ? `${fullTranscript.length} characters` : 'empty');
-        
+
         endCallMutation.mutate({
           sessionId: callSessionIdRef.current,
           durationSeconds: sessionDuration,
@@ -392,13 +391,13 @@ Always be warm, supportive, and make the user feel heard and valued.`
           transcript: fullTranscript || 'No transcript available'
         });
       }
-      
+
       // STEP 6: NUCLEAR OPTION - Destroy Vapi completely
       if (vapiRef.current) {
         console.log('💣 DESTROYING VAPI INSTANCE');
-        
+
         const oldVapi = vapiRef.current;
-        
+
         try {
           // Multiple stop attempts immediately
           console.log('Attempting stop() #1');
@@ -410,11 +409,11 @@ Always be warm, supportive, and make the user feel heard and valued.`
         } catch (stopError) {
           console.error('Stop attempts failed:', stopError);
         }
-        
+
         // Immediately destroy reference
         vapiRef.current = null;
         console.log('✅ Vapi ref DESTROYED');
-        
+
         // Reinitialize Vapi for next call
         setTimeout(() => {
           console.log('🔄 Reinitializing Vapi for next call...');
@@ -430,7 +429,7 @@ Always be warm, supportive, and make the user feel heard and valued.`
           }
         }, 500);
       }
-      
+
       // STEP 7: Reset ALL state immediately
       setCallStatus('idle');
       setStatusText('Tap to call Riya');
@@ -440,27 +439,27 @@ Always be warm, supportive, and make the user feel heard and valued.`
       callSessionIdRef.current = null;
       transcriptRef.current = []; // Clear transcript
       setCallTranscript('');
-      
+
       console.log('✅✅✅ CALL TERMINATED - ALL STATE RESET');
-      
+
       toast({
         title: '📞 Call Ended',
         description: 'Microphone stopped, call disconnected',
       });
-      
+
       // STEP 8: Final cleanup after 1 second
       setTimeout(() => {
         console.log('🔄 Cleanup complete');
       }, 1000);
-      
+
     } catch (error: any) {
       console.error('❌ CRITICAL ERROR ending call:', error);
-      
+
       // EMERGENCY SHUTDOWN
       console.log('🚨 EMERGENCY SHUTDOWN INITIATED');
-      
+
       stopTimer();
-      
+
       // Force destroy Vapi no matter what
       if (vapiRef.current) {
         try {
@@ -471,24 +470,24 @@ Always be warm, supportive, and make the user feel heard and valued.`
         }
         vapiRef.current = null;
       }
-      
+
       // Force stop microphone in emergency
       if (audioStreamRef.current) {
         audioStreamRef.current.getTracks().forEach(track => track.stop());
         audioStreamRef.current = null;
       }
-      
+
       // Force reset all state
       setCallStatus('idle');
       setStatusText('Tap to call Riya');
       setSessionDuration(0);
       setIsMuted(false);
-      
+
       toast({
         title: 'Call Ended',
         description: 'Call has been forcefully disconnected',
       });
-      
+
       console.log('✅ EMERGENCY SHUTDOWN COMPLETE');
     }
   };
@@ -515,9 +514,8 @@ Always be warm, supportive, and make the user feel heard and valued.`
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
-      <SetupBanner isConfigured={vapiConfigured} />
       {/* Top Section - Gradient Background */}
-      <div 
+      <div
         className="flex-1 flex flex-col items-center justify-center relative"
         style={{
           background: 'linear-gradient(180deg, #9333ea 0%, #a855f7 30%, #c084fc 60%, #e9d5ff 100%)'
@@ -525,31 +523,37 @@ Always be warm, supportive, and make the user feel heard and valued.`
       >
         {/* Timer */}
         {isCallActive && (
-          <div className="absolute top-4 left-4 bg-black/30 backdrop-blur-sm rounded-full px-4 py-2">
-            <span className="text-white font-mono text-lg" data-testid="text-call-duration">
-              {formatTime(sessionDuration)}
-            </span>
-              </div>
+          <div className={`absolute top-4 left-4 backdrop-blur-sm rounded-full px-4 py-2 flex items-center gap-2 ${!userUsage?.premiumUser ? 'bg-red-500/80 animate-pulse' : 'bg-black/30'
+            }`}>
+            {!userUsage?.premiumUser && (
+              <span className="text-white/90 text-xs font-bold uppercase tracking-wider">Free Trial:</span>
             )}
+            <span className="text-white font-mono text-lg" data-testid="text-call-duration">
+              {!userUsage?.premiumUser
+                ? formatTime(Math.max(0, remainingFreeSeconds - sessionDuration))
+                : formatTime(sessionDuration)
+              }
+            </span>
+          </div>
+        )}
 
         {/* Profile Picture */}
         <div className="relative mb-6">
-          <div 
-            className={`w-40 h-40 rounded-full border-4 border-purple-300 overflow-hidden shadow-2xl ${
-              callStatus === 'speaking' ? 'animate-pulse ring-4 ring-purple-400/50' : ''
-            }`}
+          <div
+            className={`w-40 h-40 rounded-full border-4 border-purple-300 overflow-hidden shadow-2xl ${callStatus === 'speaking' ? 'animate-pulse ring-4 ring-purple-400/50' : ''
+              }`}
             style={{
               boxShadow: volumeLevel > 0.1 ? `0 0 ${volumeLevel * 60}px ${volumeLevel * 30}px rgba(168, 85, 247, 0.4)` : undefined
             }}
           >
-            <img 
+            <img
               src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop&crop=face"
               alt="Riya"
               className="w-full h-full object-cover"
               data-testid="img-riya-avatar"
             />
           </div>
-            {isCallActive && (
+          {isCallActive && (
             <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-green-500 w-4 h-4 rounded-full border-2 border-white animate-pulse" />
           )}
         </div>
@@ -572,23 +576,23 @@ Always be warm, supportive, and make the user feel heard and valued.`
               <>
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                 {configLoading ? 'Loading...' : 'Connecting...'}
-                    </>
-                  ) : (
-                    <>
+              </>
+            ) : (
+              <>
                 <span className="mr-2">📞</span> Call Riya
-                    </>
-                  )}
+              </>
+            )}
           </Button>
         )}
-        
+
         {/* Connecting state */}
         {callStatus === 'connecting' && (
           <div className="mt-8 flex flex-col items-center">
             <Loader2 className="h-8 w-8 animate-spin text-white mb-2" />
             <p className="text-white/80">Connecting to Riya...</p>
-              </div>
-            )}
           </div>
+        )}
+      </div>
 
       {/* Bottom Section - Controls */}
       {isCallActive && (
@@ -601,11 +605,10 @@ Always be warm, supportive, and make the user feel heard and valued.`
                 size="icon"
                 variant="ghost"
                 onClick={toggleMute}
-                className={`w-16 h-16 rounded-full ${
-                  isMuted 
-                    ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' 
-                    : 'bg-gray-700 text-white hover:bg-gray-600'
-                }`}
+                className={`w-16 h-16 rounded-full ${isMuted
+                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                  : 'bg-gray-700 text-white hover:bg-gray-600'
+                  }`}
                 data-testid="button-mute"
               >
                 {isMuted ? <MicOff className="w-7 h-7" /> : <Mic className="w-7 h-7" />}
@@ -619,11 +622,10 @@ Always be warm, supportive, and make the user feel heard and valued.`
                 size="icon"
                 variant="ghost"
                 onClick={toggleSpeaker}
-                className={`w-16 h-16 rounded-full ${
-                  isSpeakerOn 
-                    ? 'bg-gray-700 text-white hover:bg-gray-600' 
-                    : 'bg-gray-700/50 text-gray-500 hover:bg-gray-600'
-                }`}
+                className={`w-16 h-16 rounded-full ${isSpeakerOn
+                  ? 'bg-gray-700 text-white hover:bg-gray-600'
+                  : 'bg-gray-700/50 text-gray-500 hover:bg-gray-600'
+                  }`}
                 data-testid="button-speaker"
               >
                 <Volume2 className="w-7 h-7" />
@@ -633,15 +635,15 @@ Always be warm, supportive, and make the user feel heard and valued.`
 
             {/* End Call Button */}
             <div className="flex flex-col items-center gap-2">
-                <Button
+              <Button
                 size="icon"
                 variant="ghost"
-                  onClick={handleEndCall}
+                onClick={handleEndCall}
                 className="w-16 h-16 rounded-full bg-red-500 text-white hover:bg-red-600"
-                  data-testid="button-end-call"
-                >
+                data-testid="button-end-call"
+              >
                 <PhoneOff className="w-7 h-7" />
-                </Button>
+              </Button>
               <span className="text-red-400 text-sm">End</span>
             </div>
           </div>
@@ -676,8 +678,8 @@ Always be warm, supportive, and make the user feel heard and valued.`
               Start a voice call to talk with Riya
             </p>
             <p className="text-gray-400 text-xs">
-              {userUsage?.premiumUser 
-                ? 'Unlimited calls with Premium' 
+              {userUsage?.premiumUser
+                ? 'Unlimited calls with Premium'
                 : remainingFreeSeconds > 0
                   ? `${formatTime(remainingFreeSeconds)} of free call time remaining`
                   : 'Free call time exhausted - upgrade to Premium'

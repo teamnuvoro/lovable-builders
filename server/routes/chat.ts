@@ -1,17 +1,9 @@
 import { Router, Request, Response } from "express";
 import { supabase, isSupabaseConfigured, PERSONA_CONFIGS, type PersonaType } from "../supabase";
-import { RIYA_BASE_PROMPT, FREE_MESSAGE_LIMIT } from "../prompts";
+import { RIYA_BASE_PROMPT, FREE_MESSAGE_LIMIT, PAYWALL_MESSAGE } from "../prompts";
 import Groq from "groq-sdk";
-import crypto from 'crypto';
 
 const router = Router();
-
-console.log("[Chat Routes] Initializing...");
-
-router.post("/api/chat/echo", (req, res) => {
-  console.log("[Chat Echo] Hit!");
-  res.json({ message: "Chat router is working" });
-});
 
 const DEV_USER_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -67,7 +59,21 @@ async function getOrCreateDevUser() {
 
     if (existingUser) return existingUser;
 
-    return {
+    const { data: newUser } = await supabase
+      .from('users')
+      .upsert({
+        id: DEV_USER_ID,
+        name: 'Dev User',
+        email: 'dev@example.com',
+        gender: 'male',
+        persona: 'sweet_supportive',
+        premium_user: false,
+        locale: 'hi-IN'
+      })
+      .select()
+      .single();
+
+    return newUser || {
       id: DEV_USER_ID,
       persona: 'sweet_supportive',
       premium_user: false
@@ -82,37 +88,214 @@ async function getOrCreateDevUser() {
   }
 }
 
+async function getUserMessageCount(userId: string): Promise<number> {
+  if (!isSupabaseConfigured) return 0;
+
+  try {
+    const { data: usage } = await supabase
+      .from('usage_stats')
+      .select('total_messages')
+      .eq('user_id', userId)
+      .single();
+
+    return usage?.total_messages || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function incrementMessageCount(userId: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+
+  try {
+    const { data: current } = await supabase
+      .from('usage_stats')
+      .select('total_messages, total_call_seconds')
+      .eq('user_id', userId)
+      .single();
+
+    await supabase
+      .from('usage_stats')
+      .upsert({
+        user_id: userId,
+        total_messages: (current?.total_messages || 0) + 1,
+        total_call_seconds: current?.total_call_seconds || 0,
+        updated_at: new Date().toISOString()
+      });
+  } catch (error) {
+    console.error('[incrementMessageCount] Error:', error);
+  }
+}
+
+router.post("/api/session", async (req: Request, res: Response) => {
+  try {
+    const user = await getOrCreateDevUser();
+    const userId = user?.id || DEV_USER_ID;
+
+    if (!isSupabaseConfigured) {
+      const devSessionId = crypto.randomUUID();
+      return res.json({
+        id: devSessionId,
+        user_id: userId,
+        type: 'chat',
+        started_at: new Date().toISOString()
+      });
+    }
+
+    // Check for existing active session
+    const { data: existingSessions } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .is('ended_at', null)
+      .order('started_at', { ascending: false })
+      .limit(1);
+
+    if (existingSessions && existingSessions.length > 0) {
+      return res.json(existingSessions[0]);
+    }
+
+    // Create new session
+    const { data: session, error } = await supabase
+      .from('sessions')
+      .insert({
+        user_id: userId,
+        type: 'chat',
+        started_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[POST /api/session] Supabase error:', error);
+      const devSessionId = crypto.randomUUID();
+      return res.json({
+        id: devSessionId,
+        user_id: userId,
+        type: 'chat',
+        started_at: new Date().toISOString()
+      });
+    }
+
+    res.json(session);
+  } catch (error: any) {
+    console.error("[/api/session] Error:", error);
+    const devSessionId = crypto.randomUUID();
+    res.json({
+      id: devSessionId,
+      user_id: DEV_USER_ID,
+      type: 'chat',
+      started_at: new Date().toISOString()
+    });
+  }
+});
+
+router.get("/api/messages", async (req: Request, res: Response) => {
+  try {
+    const sessionId = req.query.sessionId as string;
+
+    if (!sessionId) {
+      return res.json([]);
+    }
+
+    // If Supabase is configured, fetch from database
+    if (isSupabaseConfigured) {
+      const { data: messages, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('[GET /api/messages] Supabase error:', error);
+        return res.json([]);
+      }
+
+      // Transform snake_case to camelCase for frontend compatibility
+      const transformedMessages = (messages || []).map((msg: any) => ({
+        id: msg.id,
+        sessionId: msg.session_id,
+        userId: msg.user_id,
+        role: msg.role,
+        tag: msg.tag,
+        content: msg.text,  // Map 'text' to 'content' for frontend
+        text: msg.text,     // Keep 'text' for backward compatibility
+        createdAt: msg.created_at,
+      }));
+
+      return res.json(transformedMessages);
+    }
+
+    // Otherwise, use in-memory storage
+    const messages = inMemoryMessages.get(sessionId) || [];
+    const transformedMessages = messages.map((msg) => ({
+      id: msg.id,
+      sessionId: msg.session_id,
+      userId: msg.user_id,
+      role: msg.role,
+      tag: msg.tag,
+      content: msg.text,
+      text: msg.text,
+      createdAt: msg.created_at,
+    }));
+
+    res.json(transformedMessages);
+  } catch (error: any) {
+    console.error("[/api/messages] Error:", error);
+    res.json([]);
+  }
+});
+
 router.post("/api/chat", async (req: Request, res: Response) => {
   try {
-    const { content, sessionId, userId: reqUserId } = req.body;
+    const user = await getOrCreateDevUser();
+    const { content, sessionId } = req.body;
+    const userId = user?.id || DEV_USER_ID;
+    const userPersona = (user?.persona || 'sweet_supportive') as PersonaType;
 
-    // 1. Validate Input
+    // Validate input
     if (!content || typeof content !== "string") {
       return res.status(400).json({ error: "Message content is required" });
     }
 
-    // 2. Get User & Persona
-    let userId = reqUserId;
-    let userPersona: PersonaType = 'sweet_supportive';
-
-    if (!userId) {
-      const user = await getOrCreateDevUser();
-      userId = user.id;
-      userPersona = user.persona as PersonaType;
-    } else if (isSupabaseConfigured) {
-      const { data: user } = await supabase.from('users').select('persona').eq('id', userId).single();
-      if (user) userPersona = user.persona as PersonaType;
+    if (content.trim().length === 0) {
+      return res.status(400).json({ error: "Message cannot be empty" });
     }
 
-    console.log(`[Chat] Processing message for user ${userId} (Session: ${sessionId})`);
+    // Check paywall
+    const messageCount = await getUserMessageCount(userId);
+    const isPremium = user?.premium_user || false;
 
-    // 3. Get or Create Session
+    if (!isPremium && messageCount >= FREE_MESSAGE_LIMIT) {
+      return res.status(402).json({
+        error: "PAYWALL_HIT",
+        message: "You've reached your free message limit! Upgrade to continue chatting.",
+        messageCount,
+        messageLimit: FREE_MESSAGE_LIMIT,
+      });
+    }
+
+    console.log(`[Chat] User message: "${content.substring(0, 50)}..." (${messageCount + 1}/${FREE_MESSAGE_LIMIT})`);
+
+    // Get or create session
     let finalSessionId = sessionId;
-    if (!finalSessionId) {
+    if (!finalSessionId && isSupabaseConfigured) {
+      const { data: newSession } = await supabase
+        .from('sessions')
+        .insert({
+          user_id: userId,
+          type: 'chat',
+          started_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      finalSessionId = newSession?.id || crypto.randomUUID();
+    } else if (!finalSessionId) {
       finalSessionId = crypto.randomUUID();
     }
 
-    // 4. Save User Message
+    // Save user message
     if (isSupabaseConfigured) {
       await supabase.from('messages').insert({
         session_id: finalSessionId,
@@ -122,8 +305,8 @@ router.post("/api/chat", async (req: Request, res: Response) => {
         tag: 'general'
       });
     } else {
-      const messages = inMemoryMessages.get(finalSessionId) || [];
-      messages.push({
+      // Save to in-memory store
+      const userMessage: InMemoryMessage = {
         id: crypto.randomUUID(),
         session_id: finalSessionId,
         user_id: userId,
@@ -131,11 +314,13 @@ router.post("/api/chat", async (req: Request, res: Response) => {
         text: content,
         tag: 'general',
         created_at: new Date().toISOString()
-      });
+      };
+      const messages = inMemoryMessages.get(finalSessionId) || [];
+      messages.push(userMessage);
       inMemoryMessages.set(finalSessionId, messages);
     }
 
-    // 5. Fetch Context (Recent Messages)
+    // Get recent messages for context
     let recentContext = '';
     if (isSupabaseConfigured) {
       const { data: recentMessages } = await supabase
@@ -153,147 +338,169 @@ router.post("/api/chat", async (req: Request, res: Response) => {
       }
     }
 
-    // 6. Call Groq API
+    // Initialize Groq client
+    let groq: Groq | null = null;
     const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-      console.error("[Chat] GROQ_API_KEY missing");
-      return res.status(500).json({ error: "AI service not configured" });
+
+    if (apiKey) {
+      try {
+        groq = new Groq({ apiKey });
+      } catch (e) {
+        console.error("[Groq] Failed to initialize:", e);
+      }
+    } else {
+      console.warn("[Groq] GROQ_API_KEY not found in env.");
     }
 
-    const groq = new Groq({ apiKey });
+    if (!groq || !apiKey) {
+      console.error("[Chat] Groq service not configured");
+      return res.status(500).json({ error: "AI service not configured. Please check server logs." });
+    }
+
+    // Build system prompt with persona
     const systemPrompt = buildSystemPrompt(userPersona, recentContext);
 
-    const completion = await groq.chat.completions.create({
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content },
-      ],
-      model: "llama-3.3-70b-versatile",
-      temperature: 0.7,
-      max_tokens: 500,
+    // Call Groq API with streaming
+    const groqResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content },
+        ],
+        model: "llama-3.3-70b-versatile",
+        stream: true,
+        temperature: 0.7,
+        max_tokens: 500,
+      }),
     });
 
-    const aiResponse = completion.choices[0]?.message?.content || "Hmm, I'm not sure what to say.";
-
-    // 7. Save AI Response
-    if (isSupabaseConfigured) {
-      await supabase.from('messages').insert({
-        session_id: finalSessionId,
-        user_id: userId,
-        role: 'ai',
-        text: aiResponse,
-        tag: 'general'
-      });
-    } else {
-      const messages = inMemoryMessages.get(finalSessionId) || [];
-      messages.push({
-        id: crypto.randomUUID(),
-        session_id: finalSessionId,
-        user_id: userId,
-        role: 'ai',
-        text: aiResponse,
-        tag: 'general',
-        created_at: new Date().toISOString()
-      });
-      inMemoryMessages.set(finalSessionId, messages);
+    if (!groqResponse.ok) {
+      const errorText = await groqResponse.text();
+      console.error("[Chat] Groq API error:", errorText);
+      return res.status(500).json({ error: "AI service error. Please try again." });
     }
 
-    // 8. Return Response
-    res.json({
-      reply: aiResponse,
-      sessionId: finalSessionId
-    });
+    // Setup streaming response
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    let fullResponse = "";
+
+    if (!groqResponse.body) {
+      return res.status(500).json({ error: "No response from AI" });
+    }
+
+    const reader = groqResponse.body.getReader();
+    const decoder = new TextDecoder();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n").filter((line) => line.trim() !== "");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6);
+            if (data === "[DONE]") continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              const chunkContent = parsed.choices[0]?.delta?.content || "";
+
+              if (chunkContent) {
+                fullResponse += chunkContent;
+                const responseData = `data: ${JSON.stringify({ content: chunkContent, done: false })}\n\n`;
+                res.write(responseData);
+              }
+            } catch (e) {
+              // Skip unparseable chunks
+            }
+          }
+        }
+      }
+
+      // Save AI response
+      if (fullResponse && fullResponse.trim().length > 0) {
+        if (isSupabaseConfigured) {
+          try {
+            const { error: insertError } = await supabase.from('messages').insert({
+              session_id: finalSessionId,
+              user_id: userId,
+              role: 'ai',
+              text: fullResponse,
+              tag: 'general'
+            });
+
+            if (insertError) {
+              console.error('[Chat] Error saving AI message:', insertError);
+            } else {
+              console.log('[Chat] AI message saved to Supabase successfully');
+            }
+
+            // Increment message count
+            await incrementMessageCount(userId);
+          } catch (saveError) {
+            console.error('[Chat] Exception saving message:', saveError);
+          }
+        } else {
+          // Save to in-memory store
+          const aiMessage: InMemoryMessage = {
+            id: crypto.randomUUID(),
+            session_id: finalSessionId,
+            user_id: userId,
+            role: 'ai',
+            text: fullResponse,
+            tag: 'general',
+            created_at: new Date().toISOString()
+          };
+          const messages = inMemoryMessages.get(finalSessionId) || [];
+          messages.push(aiMessage);
+          inMemoryMessages.set(finalSessionId, messages);
+          console.log('[Chat] AI message saved to in-memory store');
+        }
+      }
+
+      // Send completion signal with the full response so frontend can display it
+      const doneData = `data: ${JSON.stringify({
+        content: "",
+        done: true,
+        sessionId: finalSessionId,
+        messageCount: messageCount + 1,
+        messageLimit: FREE_MESSAGE_LIMIT,
+        fullResponse: fullResponse // Include full response in done signal
+      })}\n\n`;
+      res.write(doneData);
+      res.end();
+
+    } catch (streamError) {
+      console.error("[Chat] Stream error:", streamError);
+      const errorData = `data: ${JSON.stringify({ error: "Stream error", done: true })}\n\n`;
+      res.write(errorData);
+      res.end();
+    }
 
   } catch (error: any) {
     console.error("[Chat] Error:", error);
-    res.status(500).json({ error: error.message || "Failed to process message" });
-  }
-});
 
-// Keep the session and messages endpoints as they are useful
-router.post("/api/session", async (req: Request, res: Response) => {
-  try {
-    const { userId } = req.body;
-    let finalUserId = userId;
-
-    if (!finalUserId) {
-      // If no user ID provided, try to get dev user or generate one
-      const user = await getOrCreateDevUser();
-      finalUserId = user.id;
+    // If headers already sent, just end
+    if (res.headersSent) {
+      const errorData = `data: ${JSON.stringify({ error: error.message, done: true })}\n\n`;
+      res.write(errorData);
+      res.end();
+    } else {
+      res.status(500).json({ error: error.message || "Failed to process message" });
     }
-
-    // Check for existing active session
-    if (isSupabaseConfigured) {
-      const { data: existingSessions } = await supabase
-        .from('sessions')
-        .select('*')
-        .eq('user_id', finalUserId)
-        .is('ended_at', null)
-        .order('started_at', { ascending: false })
-        .limit(1);
-
-      if (existingSessions && existingSessions.length > 0) {
-        return res.json(existingSessions[0]);
-      }
-
-      // Create new session
-      const { data: session, error } = await supabase
-        .from('sessions')
-        .insert({
-          user_id: finalUserId,
-          type: 'chat',
-          started_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-
-      if (!error && session) {
-        return res.json(session);
-      }
-    }
-
-    // Fallback or Dev mode
-    const sessionId = crypto.randomUUID();
-    res.json({
-      id: sessionId,
-      user_id: finalUserId,
-      type: 'chat',
-      started_at: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error("[Session] Error:", error);
-    res.status(500).json({ error: "Failed to create session" });
   }
-});
-
-router.get("/api/messages", async (req: Request, res: Response) => {
-  const sessionId = req.query.sessionId as string;
-  if (!sessionId) return res.json([]);
-
-  if (isSupabaseConfigured) {
-    const { data } = await supabase.from('messages').select('*').eq('session_id', sessionId).order('created_at', { ascending: true });
-
-    const transformed = (data || []).map((msg: any) => ({
-      id: msg.id,
-      sessionId: msg.session_id,
-      userId: msg.user_id,
-      role: msg.role,
-      content: msg.text,
-      createdAt: msg.created_at
-    }));
-    return res.json(transformed);
-  }
-
-  const messages = inMemoryMessages.get(sessionId) || [];
-  const transformed = messages.map(msg => ({
-    id: msg.id,
-    sessionId: msg.session_id,
-    userId: msg.user_id,
-    role: msg.role,
-    content: msg.text,
-    createdAt: msg.created_at
-  }));
-  res.json(transformed);
 });
 
 export default router;

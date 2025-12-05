@@ -1,197 +1,173 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+"use client";
+
+import { useState } from "react";
+import { Lock, Unlock, Send, Image as ImageIcon } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Palette, Lock, Unlock, Image as ImageIcon } from "lucide-react";
-import { ChatHeader } from "@/components/chat/ChatHeader";
-import { AvatarDisplay } from "@/components/avatar/AvatarDisplay";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { AvatarConfiguration, UnlockedContent } from "@shared/schema";
+import { ChatHeader } from "@/components/chat/ChatHeader";
+
+// Mock Data for the Gallery Item
+const SNAP_DATA = {
+    id: "snap-001",
+    imageUrl: "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=800&q=80",
+    title: "A cozy evening... 🌙",
+    price: 99,
+};
 
 export default function GalleryPage() {
+    const [isUnlocked, setIsUnlocked] = useState(false);
+    const [replyText, setReplyText] = useState("");
     const { toast } = useToast();
-    const queryClient = useQueryClient();
 
-    const { data: avatarConfig, isLoading: configLoading } = useQuery<AvatarConfiguration>({
-        queryKey: ["avatarConfig"],
-        queryFn: async () => {
-            const res = await fetch("/api/avatar/config");
-            if (!res.ok) throw new Error("Failed to fetch config");
-            return res.json();
-        },
-    });
+    const handleUnlock = () => {
+        console.log("Payment Triggered for Snap:", SNAP_DATA.id);
 
-    const { data: unlocks, isLoading: unlocksLoading } = useQuery<UnlockedContent[]>({
-        queryKey: ["unlocks"],
-        queryFn: async () => {
-            const res = await fetch("/api/unlocks");
-            if (!res.ok) throw new Error("Failed to fetch unlocks");
-            return res.json();
-        },
-    });
-
-    const updateConfigMutation = useMutation({
-        mutationFn: async (newConfig: Partial<AvatarConfiguration>) => {
-            const res = await fetch("/api/avatar/config", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newConfig),
-            });
-            if (!res.ok) throw new Error("Failed to update config");
-            return res.json();
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["avatarConfig"] });
+        // Simulate payment delay
+        setTimeout(() => {
+            setIsUnlocked(true);
             toast({
-                title: "Style Updated",
-                description: "Riya's look has been updated!",
+                title: "Memory Unlocked! 🔓",
+                description: "You've unlocked a private moment with Riya.",
+                duration: 3000,
             });
-        },
-        onError: () => {
-            toast({
-                title: "Error",
-                description: "Failed to update style. Please try again.",
-                variant: "destructive",
-            });
-        },
-    });
-
-    const handleConfigChange = (key: keyof AvatarConfiguration, value: string) => {
-        updateConfigMutation.mutate({ [key]: value });
+        }, 1000);
     };
 
-    if (configLoading || unlocksLoading) {
-        return (
-            <div className="flex h-screen items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-        );
-    }
+    const handleSendReply = () => {
+        if (!replyText.trim()) return;
+
+        console.log("Reply sent:", replyText);
+        setReplyText("");
+        toast({
+            title: "Reply Sent",
+            description: "Riya will see your message!",
+        });
+    };
 
     return (
-        <div className="flex flex-col h-screen bg-background">
+        <div className="flex flex-col min-h-screen bg-gray-900 text-gray-100 pb-20">
             <ChatHeader />
 
-            <main className="flex-1 container max-w-4xl mx-auto p-4 overflow-y-auto">
-                <div className="flex items-center gap-2 mb-6">
-                    <Palette className="w-6 h-6 text-primary" />
-                    <h1 className="text-2xl font-bold">Riya's Gallery & Style</h1>
+            <main className="flex-1 container max-w-5xl mx-auto p-4 md:p-6 space-y-6">
+                {/* Header Section */}
+                <div className="flex flex-col gap-1">
+                    <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
+                        Riya's Private Snaps
+                    </h1>
+                    <div className="flex items-center gap-2 text-sm font-medium text-pink-300/80">
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>1 Premium Photo Available</span>
+                    </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Left Column: Avatar Preview */}
-                    <div className="md:col-span-1 space-y-4">
-                        <Card className="overflow-hidden">
-                            <CardHeader>
-                                <CardTitle>Current Look</CardTitle>
-                            </CardHeader>
-                            <CardContent className="p-0">
-                                <div className="aspect-[3/4] relative">
-                                    <AvatarDisplay
-                                        className="h-full w-full"
-                                    // We will pass config here once we update AvatarDisplay
-                                    // For now it uses default or passed props
-                                    />
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </div>
+                {/* Gallery Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
-                    {/* Right Column: Customization & Gallery */}
-                    <div className="md:col-span-2">
-                        <Tabs defaultValue="customize" className="w-full">
-                            <TabsList className="grid w-full grid-cols-2">
-                                <TabsTrigger value="customize">Customize Look</TabsTrigger>
-                                <TabsTrigger value="gallery">Unlocked Memories</TabsTrigger>
-                            </TabsList>
+                    {/* The Main Locked Snap Card */}
+                    <div className="relative group rounded-2xl overflow-hidden aspect-[3/4] shadow-2xl bg-gray-800 border border-gray-700/50">
 
-                            <TabsContent value="customize" className="space-y-4 mt-4">
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle>Style Settings</CardTitle>
-                                        <CardDescription>
-                                            Customize how Riya appears to you.
-                                        </CardDescription>
-                                    </CardHeader>
-                                    <CardContent className="space-y-4">
-                                        <div className="space-y-2">
-                                            <Label>Art Style</Label>
-                                            <Select
-                                                value={avatarConfig?.avatarStyle || "anime"}
-                                                onValueChange={(v) => handleConfigChange("avatarStyle", v)}
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select style" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="anime">Anime Style</SelectItem>
-                                                    <SelectItem value="realistic">Realistic</SelectItem>
-                                                    <SelectItem value="semi_realistic">Semi-Realistic</SelectItem>
-                                                    <SelectItem value="artistic">Artistic</SelectItem>
-                                                </SelectContent>
-                                            </Select>
+                        {/* Background Image Wrapper */}
+                        <div className="absolute inset-0 w-full h-full overflow-hidden">
+                            <motion.img
+                                src={SNAP_DATA.imageUrl}
+                                alt="Locked Content"
+                                className="w-full h-full object-cover"
+                                initial={false}
+                                animate={{
+                                    filter: isUnlocked ? "blur(0px)" : "blur(16px)",
+                                    scale: isUnlocked ? 1 : 1.05,
+                                }}
+                                transition={{ duration: 0.8, ease: "easeInOut" }}
+                            />
+                        </div>
+
+                        {/* Overlay for Locked State */}
+                        <AnimatePresence>
+                            {!isUnlocked && (
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6"
+                                >
+                                    <div className="w-full max-w-[280px] bg-gray-900/90 border border-white/10 backdrop-blur-md rounded-xl p-6 flex flex-col items-center text-center gap-4 shadow-xl transform transition-all hover:scale-105 duration-300">
+                                        <div className="p-3 bg-pink-500/20 rounded-full text-pink-400">
+                                            <Lock className="w-6 h-6" />
                                         </div>
 
-
-
-                                        <div className="space-y-2">
-                                            <Label>Outfit</Label>
-                                            <Select
-                                                value={avatarConfig?.outfit || "casual"}
-                                                onValueChange={(v) => handleConfigChange("outfit", v)}
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select outfit" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="casual">Casual Daywear</SelectItem>
-                                                    <SelectItem value="date_night">Date Night</SelectItem>
-                                                    <SelectItem value="traditional">Traditional</SelectItem>
-                                                    <SelectItem value="winter">Winter Cozy</SelectItem>
-                                                </SelectContent>
-                                            </Select>
+                                        <div className="space-y-1">
+                                            <h3 className="font-semibold text-white text-lg">Unlock this memory</h3>
+                                            <p className="text-xs text-gray-400">
+                                                See what Riya is up to right now...
+                                            </p>
                                         </div>
-                                    </CardContent>
-                                </Card>
-                            </TabsContent>
 
-                            <TabsContent value="gallery" className="mt-4">
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle>Unlocked Content</CardTitle>
-                                        <CardDescription>
-                                            Special moments and photos you've unlocked.
-                                        </CardDescription>
-                                    </CardHeader>
-                                    <CardContent>
-                                        {unlocks && unlocks.length > 0 ? (
-                                            <div className="grid grid-cols-2 gap-4">
-                                                {unlocks.map((item) => (
-                                                    <div key={item.id} className="relative aspect-square rounded-lg overflow-hidden border bg-muted">
-                                                        {/* Placeholder for actual content */}
-                                                        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-                                                            <ImageIcon className="w-8 h-8" />
-                                                        </div>
-                                                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-2 text-white text-xs">
-                                                            Unlocked via {item.unlockMethod}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="text-center py-12 text-muted-foreground">
-                                                <Lock className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                                                <p>No content unlocked yet.</p>
-                                                <p className="text-sm">Keep chatting with Riya to unlock special memories!</p>
-                                            </div>
-                                        )}
-                                    </CardContent>
-                                </Card>
-                            </TabsContent>
-                        </Tabs>
+                                        <Button
+                                            onClick={handleUnlock}
+                                            className="w-full bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white font-bold border-0 shadow-lg shadow-pink-500/20"
+                                        >
+                                            Unlock for ₹{SNAP_DATA.price}
+                                        </Button>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        {/* Content for Unlocked State (Chat Interface) */}
+                        <AnimatePresence>
+                            {isUnlocked && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.5 }}
+                                    className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-gray-900 via-gray-900/80 to-transparent pt-12"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative flex-1">
+                                            <Input
+                                                value={replyText}
+                                                onChange={(e) => setReplyText(e.target.value)}
+                                                placeholder="Reply to Riya..."
+                                                className="bg-white/10 border-white/10 text-white placeholder-white/50 rounded-full pr-10 focus-visible:ring-pink-500 focus-visible:border-transparent backdrop-blur-md"
+                                            />
+                                            <Button
+                                                size="icon"
+                                                variant="ghost"
+                                                className="absolute right-1 top-1 h-8 w-8 text-pink-400 hover:text-pink-300 hover:bg-transparent"
+                                                onClick={handleSendReply}
+                                            >
+                                                <Send className="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        {/* Status Badge (Top Left) */}
+                        <div className="absolute top-4 left-4">
+                            <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider backdrop-blur-md border ${isUnlocked
+                                    ? "bg-green-500/20 border-green-500/30 text-green-300"
+                                    : "bg-pink-500/20 border-pink-500/30 text-pink-300 animate-pulse"
+                                }`}>
+                                {isUnlocked ? "Unlocked" : "Premium"}
+                            </div>
+                        </div>
+
                     </div>
+
+                    {/* Placeholder cards for future content grid layout */}
+                    {[1, 2].map((i) => (
+                        <div key={i} className="hidden md:flex rounded-2xl bg-gray-800/30 border border-gray-800 items-center justify-center text-gray-600 aspect-[3/4] border-dashed">
+                            <div className="flex flex-col items-center gap-2">
+                                <ImageIcon className="w-8 h-8 opacity-20" />
+                                <span className="text-xs font-medium opacity-40">Coming Soon</span>
+                            </div>
+                        </div>
+                    ))}
+
                 </div>
             </main>
         </div>

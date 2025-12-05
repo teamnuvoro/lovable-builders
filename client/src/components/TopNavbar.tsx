@@ -7,6 +7,7 @@ import {
   Settings,
   LogOut,
   Crown,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -31,7 +32,7 @@ export function TopNavbar() {
   };
 
   return (
-    <nav 
+    <nav
       className="fixed top-0 left-0 right-0 h-[60px] z-50 shadow-md"
       style={{
         background: 'linear-gradient(135deg, #8B4FB8 0%, #E94B9F 100%)',
@@ -42,7 +43,7 @@ export function TopNavbar() {
         <Link href="/chat">
           <div className="flex items-center gap-3 cursor-pointer hover:opacity-90 transition-opacity">
             {/* Profile Picture */}
-            <div 
+            <div
               className="w-11 h-11 rounded-full border-2 border-white flex items-center justify-center overflow-hidden flex-shrink-0"
               style={{
                 background: 'linear-gradient(135deg, #8B4FB8 0%, #E94B9F 100%)',
@@ -92,14 +93,14 @@ export function TopNavbar() {
                       <stop offset="100%" stopColor="#a855f7" />
                     </linearGradient>
                     <filter id="glow">
-                      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+                      <feGaussianBlur stdDeviation="1.5" result="coloredBlur" />
                       <feMerge>
-                        <feMergeNode in="coloredBlur"/>
-                        <feMergeNode in="SourceGraphic"/>
+                        <feMergeNode in="coloredBlur" />
+                        <feMergeNode in="SourceGraphic" />
                       </feMerge>
                     </filter>
                   </defs>
-                  
+
                   <g filter="url(#glow)">
                     {/* Heart shape */}
                     <path
@@ -110,7 +111,7 @@ export function TopNavbar() {
                       strokeLinejoin="round"
                       fill="none"
                     />
-                    
+
                     {/* Y-shaped stem extending from heart */}
                     <path
                       d="M10 14L10 17M8 19L10 17L12 19"
@@ -119,11 +120,11 @@ export function TopNavbar() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
-                    
+
                     {/* Small plus sign at top-right */}
                     <g transform="translate(14, 2)">
-                      <line x1="2" y1="0" x2="2" y2="4" stroke="#ec4899" strokeWidth="1.2" strokeLinecap="round"/>
-                      <line x1="0" y1="2" x2="4" y2="2" stroke="#ec4899" strokeWidth="1.2" strokeLinecap="round"/>
+                      <line x1="2" y1="0" x2="2" y2="4" stroke="#ec4899" strokeWidth="1.2" strokeLinecap="round" />
+                      <line x1="0" y1="2" x2="4" y2="2" stroke="#ec4899" strokeWidth="1.2" strokeLinecap="round" />
                     </g>
                   </g>
                 </svg>
@@ -144,6 +145,28 @@ export function TopNavbar() {
             <Crown className="w-4 h-4 text-yellow-900" />
             <span className="text-xs font-bold text-yellow-900 hidden sm:inline">Premium</span>
           </button>
+
+          {/* Gallery Button with NEW Badge */}
+          <Link href="/gallery">
+            <button
+              className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-full transition-all duration-300 flex items-center gap-2 border border-white/20 relative group"
+              title="Private Gallery"
+            >
+              <div className="relative">
+                <ImageIcon className="w-5 h-5 sm:w-6 sm:h-6 text-white group-hover:scale-110 transition-transform" />
+                <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-500"></span>
+                </span>
+              </div>
+              <span className="text-xs font-semibold text-white hidden sm:inline flex items-center gap-1">
+                Gallery
+                <span className="px-1.5 py-0.5 rounded-full bg-purple-500 text-[9px] font-bold text-white animate-pulse">
+                  NEW
+                </span>
+              </span>
+            </button>
+          </Link>
 
           {actionItems.map((item) => (
             <Link key={item.url} href={item.url}>
@@ -171,11 +194,11 @@ export function TopNavbar() {
             {isDropdownOpen && (
               <>
                 {/* Backdrop to close dropdown */}
-                <div 
-                  className="fixed inset-0 z-40" 
+                <div
+                  className="fixed inset-0 z-40"
                   onClick={() => setIsDropdownOpen(false)}
                 />
-                
+
                 <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-xl z-50 border border-gray-200">
                   <div className="py-2">
                     <button

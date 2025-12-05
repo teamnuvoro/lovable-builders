@@ -12,6 +12,7 @@ import authRoutes from "./routes/auth";
 import paymentRoutes from "./routes/payment";
 import transcribeRoutes from "./routes/deepgram-transcribe";
 import messagesHistoryRoutes from "./routes/messages-history";
+import analyticsRoutes from "./routes/analytics-events";
 
 const app = express();
 
@@ -64,6 +65,9 @@ app.use(transcribeRoutes);
 
 // Messages history routes (for Memories page)
 app.use(messagesHistoryRoutes);
+
+// Analytics routes
+app.use(analyticsRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {

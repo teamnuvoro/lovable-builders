@@ -74,10 +74,28 @@ app.use(async (req, res, next) => {
 });
 
 // CORS Middleware
+// CORS Middleware
 app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
+    // Allow requests from your Vercel frontend and Render backend
+    const allowedOrigins = [
+        "https://project1-kappa-tan.vercel.app",
+        "https://project1-2q99.onrender.com",
+        "http://localhost:5173",
+        "http://localhost:3000"
+    ];
+
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+        res.header("Access-Control-Allow-Origin", origin);
+    } else {
+        // Fallback for development or direct API calls
+        res.header("Access-Control-Allow-Origin", "*");
+    }
+
     res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-webhook-signature, x-webhook-timestamp");
+    res.header("Access-Control-Allow-Credentials", "true");
+
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }

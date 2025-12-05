@@ -1,7 +1,11 @@
 const RAW_CASHFREE_ENV = (process.env.CASHFREE_ENV || "TEST").toUpperCase();
+const SECRET_KEY = process.env.CASHFREE_SECRET_KEY || "";
 
+// Auto-detect production mode if key says "prod" or env var says "PRODUCTION"
 export const cashfreeMode =
-  RAW_CASHFREE_ENV === "PRODUCTION" || RAW_CASHFREE_ENV === "PROD"
+  RAW_CASHFREE_ENV === "PRODUCTION" ||
+    RAW_CASHFREE_ENV === "PROD" ||
+    SECRET_KEY.startsWith("cfsk_ma_prod")
     ? "production"
     : "sandbox";
 

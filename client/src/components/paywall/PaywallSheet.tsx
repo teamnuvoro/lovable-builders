@@ -40,10 +40,6 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
     staleTime: Infinity,
   });
 
-  const planAmounts = paymentConfig?.plans ?? { daily: 19, weekly: 49 };
-
-  const cashfreeMode = "production";
-
   const createOrderMutation = useMutation({
     mutationFn: async (planType: 'daily' | 'weekly') => {
       const response = await apiRequest('POST', '/api/payment/create-order', { planType });
@@ -51,9 +47,44 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
     },
   });
 
+  const planAmounts = paymentConfig?.plans ?? { daily: 19, weekly: 49 };
+
+  const cashfreeMode = paymentConfig?.cashfreeMode || "production";
+
+  const loadCashfreeSdk = (mode: "sandbox" | "production") => {
+    return new Promise((resolve) => {
+      const scriptId = 'cashfree-sdk';
+      const existingScript = document.getElementById(scriptId);
+
+      const src = mode === "sandbox"
+        ? "https://sdk.cashfree.com/js/ui/2.0.0/cashfree.sandbox.js"
+        : "https://sdk.cashfree.com/js/ui/2.0.0/cashfree.prod.js";
+
+      if (existingScript && (existingScript as HTMLScriptElement).src === src) {
+        resolve(true);
+        return;
+      }
+
+      if (existingScript) {
+        existingScript.remove();
+      }
+
+      const script = document.createElement("script");
+      script.id = scriptId;
+      script.src = src;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const handleSelectPlan = async (planType: 'daily' | 'weekly') => {
     try {
       setIsProcessing(true);
+
+      // Load correct SDK first
+      await loadCashfreeSdk(cashfreeMode);
+
       analytics.track("checkout_started", { plan: planType, amount: planAmounts[planType] });
       trackPlanSelected(planType, planAmounts[planType], planType === 'daily' ? 1 : 7);
 

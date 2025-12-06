@@ -69,13 +69,10 @@ app.use(messagesHistoryRoutes);
 // Analytics routes
 app.use(analyticsRoutes);
 
-// Health check
-app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
-});
+
 
 // User usage endpoint
-app.post("/api/user/usage", async (_req, res) => {
+app.get("/api/user/usage", async (_req, res) => {
   res.json({
     messageCount: 0,
     callDuration: 0,
@@ -101,17 +98,9 @@ app.get("/api/auth/session", async (req, res) => {
   try {
     // For dev mode, return a mock user
     // In production, this should validate the session
-    res.json({
-      user: {
-        id: "dev-user-id",
-        name: "Dev User",
-        email: "dev@example.com",
-        persona: "sweet_supportive",
-        premium_user: false,
-        gender: "male",
-        onboarding_complete: false // Track if user completed onboarding
-      }
-    });
+    // Secure default: Return 401 if not authenticated
+    // Client should use Supabase auth to establish session
+    res.status(401).json({ error: "Authentication required" });
   } catch (error: any) {
     console.error("[/api/auth/session] Error:", error);
     res.status(500).json({ error: "Failed to get session" });

@@ -376,7 +376,7 @@ export default function ChatPage() {
       </div>
 
       {/* Fixed Input at Bottom - Responsive */}
-      <div className="flex-shrink-0 w-full z-20 bg-white">
+      <div className="flex-shrink-0 w-full z-20 bg-white pb-[env(safe-area-inset-bottom)]">
         <ChatInput
           onSendMessage={handleSendMessage}
           isLoading={sendMessageMutation.isPending || isTyping}

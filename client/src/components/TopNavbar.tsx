@@ -163,18 +163,7 @@ export function TopNavbar() {
 
                     <div className="h-px bg-gray-100 my-1 mx-4"></div>
 
-                    {/* Memories */}
-                    <Link href="/memories">
-                      <button
-                        onClick={() => setIsDropdownOpen(false)}
-                        className="w-full px-4 py-3 text-left text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-3 group"
-                      >
-                        <div className="p-2 bg-gray-100 rounded-full group-hover:bg-gray-200 transition-colors">
-                          <Video className="w-4 h-4 text-gray-500" />
-                        </div>
-                        <span className="font-medium text-sm">Memories</span>
-                      </button>
-                    </Link>
+
 
                     {/* Settings */}
                     <Link href="/settings">

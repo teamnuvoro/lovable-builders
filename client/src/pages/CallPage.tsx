@@ -24,6 +24,7 @@ export default function CallPage() {
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [statusText, setStatusText] = useState('Tap to call Riya');
   const [isVapiReady, setIsVapiReady] = useState(false);
+  const [callTranscript, setCallTranscript] = useState('');
   const vapiRef = useRef<Vapi | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const callSessionIdRef = useRef<string | null>(null);
@@ -64,14 +65,14 @@ export default function CallPage() {
   });
 
   const startCallMutation = useMutation({
-    mutationFn: async (vapiCallId?: string) => {
-      const response = await apiRequest("POST", "/api/call/start", { vapiCallId });
+    mutationFn: async (data?: { vapiCallId?: string }) => {
+      const response = await apiRequest("POST", "/api/call/start", data || {});
       return response.json();
     },
   });
 
   const endCallMutation = useMutation({
-    mutationFn: async (data: { sessionId?: string; durationSeconds: number; endReason: string }) => {
+    mutationFn: async (data: { sessionId?: string; durationSeconds: number; endReason: string; transcript?: string }) => {
       const response = await apiRequest("POST", "/api/call/end", data);
       return response.json();
     },
@@ -261,7 +262,7 @@ export default function CallPage() {
       setStatusText('Starting conversation...');
       analytics.track("voice_call_started");
 
-      const sessionResult = await startCallMutation.mutateAsync();
+      const sessionResult = await startCallMutation.mutateAsync({});
       if (sessionResult?.id) {
         callSessionIdRef.current = sessionResult.id;
       }

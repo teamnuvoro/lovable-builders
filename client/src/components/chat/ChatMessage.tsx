@@ -1,6 +1,13 @@
-import { type Message } from "@shared/schema";
 import { format } from "date-fns";
 import { motion } from "framer-motion";
+
+interface Message {
+  id: string;
+  role: "user" | "ai" | "assistant";
+  text?: string;
+  content?: string;
+  createdAt?: string | Date;
+}
 
 interface ChatMessageProps {
   message: Message;
@@ -8,7 +15,7 @@ interface ChatMessageProps {
 
 export function ChatMessage({ message }: ChatMessageProps) {
   const isAI = message.role === "assistant" || message.role === "ai";
-  const content = (message as any).content || (message as any).text || "";
+  const content = message.content || message.text || "";
   
   return (
     <motion.div 

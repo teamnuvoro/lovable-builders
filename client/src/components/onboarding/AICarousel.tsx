@@ -20,7 +20,10 @@ export function AICarousel({ assistants, onSelectAI, selectedAI }: AICarouselPro
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    onSelectAI(assistants[currentIndex]?.id || null);
+    const id = assistants[currentIndex]?.id;
+    if (id !== undefined) {
+      onSelectAI(id);
+    }
   }, [currentIndex, assistants, onSelectAI]);
 
   const handleScroll = () => {

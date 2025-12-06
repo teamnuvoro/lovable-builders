@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }: { data: { session: any } }) => {
       if (session?.user) {
         fetchProfile(session.user.id);
       } else {
@@ -52,15 +52,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      } else {
-        setUser(null);
-        setIsLoading(false);
-        queryClient.clear();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event: string, session: any) => {
+        if (session?.user) {
+          fetchProfile(session.user.id);
+        } else {
+          setUser(null);
+          setIsLoading(false);
+          queryClient.clear();
+        }
       }
-    });
+    );
 
     return () => subscription.unsubscribe();
   }, []);

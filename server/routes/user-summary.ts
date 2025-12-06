@@ -235,11 +235,11 @@ router.get('/:userId/progression', async (req: Request, res: Response) => {
     const nextIncrement = getNextSessionIncrement(sessionCount);
 
     let sessionsToMax = 0;
-    let tempLevel = currentLevel;
+    let tempLevel: number = currentLevel;
     let tempSession = sessionCount;
     while (tempLevel < UNDERSTANDING_CONSTANTS.MAX_LEVEL && sessionsToMax < 100) {
       tempSession++;
-      tempLevel = calculateUnderstandingLevel(tempSession) as number;
+      tempLevel = calculateUnderstandingLevel(tempSession);
       sessionsToMax++;
     }
 

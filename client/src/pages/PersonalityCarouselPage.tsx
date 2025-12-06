@@ -114,11 +114,9 @@ export default function PersonalityCarouselPage() {
   };
 
   if (currentScreen === "success") {
-    const selected = personas.find(p => p.id === selectedPersona);
     return (
       <ProfileCreatedScreen 
         onComplete={handleSuccessComplete}
-        personaName={selected?.name || "Riya"}
       />
     );
   }

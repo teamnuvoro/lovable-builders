@@ -1,20 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://xgraxcgavqeyqfwimbwt.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Use environment variables from Lovable Cloud
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-// In production, VITE_SUPABASE_ANON_KEY is required
-if (import.meta.env.PROD && !supabaseAnonKey) {
-  console.error('[Supabase] ERROR: VITE_SUPABASE_ANON_KEY is required in production');
-}
-
-// In development, use mock key if not provided
-const anonKey = supabaseAnonKey || 'mock-anon-key-for-development';
-
-export const supabase = createClient(supabaseUrl, anonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    storage: localStorage,
+    persistSession: true,
+    autoRefreshToken: true,
+  }
+});
 
 // Flag to check if Supabase is properly configured
-export const isSupabaseConfigured = !!supabaseAnonKey;
+export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
 
 export type PersonaType = 'sweet_supportive' | 'playful_flirty' | 'bold_confident' | 'calm_mature';
 export type GenderType = 'male' | 'female' | 'other' | 'prefer_not_to_say';

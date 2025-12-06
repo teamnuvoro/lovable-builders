@@ -262,7 +262,25 @@ export default function ChatPage() {
           }
         }
 
-        // Update messages with the real response
+        // Message complete - Update Cache Manually to prevent flicker
+        const completedMessage = {
+          id: generateTempId(), // Temporary ID until refetch
+          content: aiResponseText,
+          role: 'assistant',
+          sessionId: session.id,
+          createdAt: new Date()
+        };
+
+        queryClient.setQueryData(['messages', session.id], (old: Message[] | undefined) => {
+          if (!old) return [completedMessage];
+          // Check if already exists to avoid dupes (unlikely with temp ID)
+          return [...old, completedMessage];
+        });
+
+        // NOW clear streaming so we don't duplicate
+        setStreamingMessage("");
+
+        // Then re-fetch for truth
         queryClient.invalidateQueries({ queryKey: ["messages", session.id] });
         queryClient.invalidateQueries({ queryKey: ["/api/user/usage"] });
 
@@ -270,10 +288,10 @@ export default function ChatPage() {
 
       } catch (error: any) {
         console.error("Chat error:", error);
+        setStreamingMessage(""); // Clear on error
         throw error;
       } finally {
         setIsTyping(false);
-        setStreamingMessage(""); // Clear streaming message as it will be replaced by real message from query
       }
     },
     onError: (error, variables) => {

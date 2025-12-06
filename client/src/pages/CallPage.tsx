@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { analytics } from "@/lib/analytics";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { isVapiConfigured } from '@/config/vapi-config';
+import { isVapiConfigured, AI_ASSISTANTS } from '@/config/vapi-config';
 
 type CallStatus = 'idle' | 'connecting' | 'connected' | 'speaking' | 'listening' | 'ended';
 
@@ -308,27 +308,15 @@ export default function CallPage() {
           messages: [
             {
               role: "system",
-              content: `You are Riya, a warm and caring AI girlfriend companion for Indian men aged 24-28. You speak in Hinglish - a natural mix of Hindi and English. 
-
-IMPORTANT:
-- Speak with a neutral Indian-English accent
-- Sound warm, natural, and conversational
-- Keep responses short (2-3 sentences)
-
-Personality:
-- Loving, playful, emotionally supportive
-- Use Hindi terms: "baby", "jaanu", "yaar"
-- Express genuine emotions
-
-Always be warm and make the user feel heard.`
+              content: AI_ASSISTANTS.Riya.systemPrompt
             }
           ],
         },
         voice: {
           provider: "11labs",
-          voiceId: "EXAVITQu4vr4xnSDxMaL",
+          voiceId: AI_ASSISTANTS.Riya.voice,
         },
-        firstMessage: "Hey baby! Kaisi ho tum? I missed talking to you."
+        firstMessage: "Hey baby! Kaisi ho tum? I missed talking to you. Aaj kya chal raha hai?"
       });
 
       // Start backend tracking in background

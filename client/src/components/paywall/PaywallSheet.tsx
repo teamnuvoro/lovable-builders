@@ -93,14 +93,19 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
         throw new Error('Failed to create payment session');
       }
 
-      // Initialize Cashfree SDK v3
+      // Initialize Cashfree SDK v3 (Factory function, no 'new' needed usually, but handles both)
       if (!window.Cashfree) {
-        throw new Error("Cashfree SDK failed to load");
+        throw new Error("Cashfree SDK failed to load. Please check your internet connection.");
       }
 
-      const cashfree = new window.Cashfree({
+      const cashfree = window.Cashfree({
         mode: cashfreeMode,
       });
+
+      if (typeof cashfree.checkout !== 'function') {
+        console.error("Cashfree SDK loaded but checkout is missing. Possible AdBlocker interference.");
+        throw new Error("Payment initialization failed. Please disable your AdBlocker and try again.");
+      }
 
       // Open checkout
       const checkoutOptions = {

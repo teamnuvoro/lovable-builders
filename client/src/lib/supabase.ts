@@ -1,10 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Use environment variables from Lovable Cloud
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// Use environment variables (support both naming conventions)
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://xgraxcgavqeyqfwimbwt.supabase.co';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Supabase URL or Key is missing!');
+}
+
+export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
   auth: {
     storage: localStorage,
     persistSession: true,

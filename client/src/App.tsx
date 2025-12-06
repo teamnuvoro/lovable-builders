@@ -11,6 +11,7 @@ import ChatPage from "@/pages/ChatPage";
 import CallPage from "@/pages/CallPage";
 import SummaryPage from "@/pages/SummaryPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
+import { ProtectedLayout } from "@/components/layouts/ProtectedLayout";
 import PaymentCallback from "@/pages/PaymentCallback";
 import HistoryPage from "@/pages/HistoryPage";
 import HistoryDetailPage from "@/pages/HistoryDetailPage";
@@ -72,18 +73,17 @@ function Router() {
 
   const content = (
     <Switch>
-      {/* Landing/Auth Routes - No Sidebar */}
+      {/* ----------------------------------------------------------------- */}
+      {/* 🟢 PUBLIC ZONE (Auth Routes) */}
+      {/* ----------------------------------------------------------------- */}
       <Route path="/">
         {() => {
           const { isLoading } = useAuth();
-
-          if (isLoading) {
-            return <div className="flex h-screen w-full items-center justify-center bg-pink-50"></div>; // Or a spinner
-          }
+          if (isLoading) return <div className="flex h-screen w-full items-center justify-center bg-pink-50"></div>;
 
           if (!isAuthenticated) return <LandingPage />;
 
-          // Skip persona selection - Riya is default
+          // Authenticated users go to Vault
           if (user && !user.onboarding_complete) {
             return <Redirect to="/chat" />;
           }
@@ -94,48 +94,49 @@ function Router() {
       <Route path="/signup" component={SignupPage} />
       <Route path="/login" component={LoginPage} />
 
-      {/* Main App Routes - With Sidebar */}
+      {/* ----------------------------------------------------------------- */}
+      {/* 🔒 PROTECTED ZONE (The Vault) */}
+      {/* ----------------------------------------------------------------- */}
       <Route path="/chat">
-        {() => <ProtectedRoute component={ChatPage} />}
+        {() => <ProtectedLayout><ChatPage /></ProtectedLayout>}
       </Route>
       <Route path="/call">
-        {() => <ProtectedRoute component={CallPage} />}
+        {() => <ProtectedLayout><CallPage /></ProtectedLayout>}
       </Route>
       <Route path="/summary">
-        {() => <ProtectedRoute component={SummaryPage} />}
+        {() => <ProtectedLayout><SummaryPage /></ProtectedLayout>}
       </Route>
       <Route path="/analytics">
-        {() => <ProtectedRoute component={AnalyticsPage} />}
+        {() => <ProtectedLayout><AnalyticsPage /></ProtectedLayout>}
       </Route>
       <Route path="/settings">
-        {() => <ProtectedRoute component={SettingsPage} />}
+        {() => <ProtectedLayout><SettingsPage /></ProtectedLayout>}
       </Route>
       <Route path="/memories">
-        {() => <ProtectedRoute component={MemoriesPage} />}
+        {() => <ProtectedLayout><MemoriesPage /></ProtectedLayout>}
       </Route>
       <Route path="/gallery">
-        {() => <ProtectedRoute component={GalleryPage} />}
+        {() => <ProtectedLayout><GalleryPage /></ProtectedLayout>}
       </Route>
       <Route path="/payment/callback">
-        {() => <ProtectedRoute component={PaymentCallback} />}
+        {() => <ProtectedLayout><PaymentCallback /></ProtectedLayout>}
       </Route>
       <Route path="/history">
-        {() => <ProtectedRoute component={HistoryPage} />}
+        {() => <ProtectedLayout><HistoryPage /></ProtectedLayout>}
       </Route>
       <Route path="/history/:id">
-        {() => <ProtectedRoute component={() => <HistoryDetailPage />} />}
+        {() => <ProtectedLayout><HistoryDetailPage /></ProtectedLayout>}
       </Route>
 
       <Route component={NotFound} />
     </Switch>
   );
 
-  // Wrap with appropriate layout
-  if (needsNavbar && isAuthenticated) {
-    return <MainLayout>{content}</MainLayout>;
-  }
-
-  return <FullScreenLayout>{content}</FullScreenLayout>;
+  return (
+    <div className="min-h-screen w-full">
+      {content}
+    </div>
+  );
 }
 
 function App() {

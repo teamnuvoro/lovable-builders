@@ -77,117 +77,17 @@ export function TopNavbar() {
 
         {/* Right: Action Icons */}
         <div className="flex items-center gap-1 sm:gap-2">
-          {/* Relationship Profile Button */}
-          <Link href="/summary">
+          {/* Voice Call Button (Visible) */}
+          <Link href="/call">
             <button
-              className="px-3 py-2 bg-white/95 hover:bg-white rounded-full transition-all duration-300 flex items-center gap-2 shadow-md hover:shadow-lg hover:scale-105 active:scale-95 border border-pink-200"
-              title="Relationship Profile"
+              className="p-2 rounded-full text-white hover:bg-white/20 transition-colors"
+              title="Voice Call"
             >
-              <div className="relative w-5 h-5 flex items-center justify-center">
-                {/* Heart with Y-stem and plus icon */}
-                <svg width="20" height="22" viewBox="0 0 20 22" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  {/* Glow effect */}
-                  <defs>
-                    <linearGradient id="heartGradient" x1="10" y1="2" x2="10" y2="20" gradientUnits="userSpaceOnUse">
-                      <stop offset="0%" stopColor="#ec4899" />
-                      <stop offset="50%" stopColor="#d946ef" />
-                      <stop offset="100%" stopColor="#a855f7" />
-                    </linearGradient>
-                    <filter id="glow">
-                      <feGaussianBlur stdDeviation="1.5" result="coloredBlur" />
-                      <feMerge>
-                        <feMergeNode in="coloredBlur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                  </defs>
-
-                  <g filter="url(#glow)">
-                    {/* Heart shape */}
-                    <path
-                      d="M10 5C10 5 7.5 2.5 5 2.5C3 2.5 1.5 4 1.5 6C1.5 9 10 14 10 14C10 14 18.5 9 18.5 6C18.5 4 17 2.5 15 2.5C12.5 2.5 10 5 10 5Z"
-                      stroke="url(#heartGradient)"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      fill="none"
-                    />
-
-                    {/* Y-shaped stem extending from heart */}
-                    <path
-                      d="M10 14L10 17M8 19L10 17L12 19"
-                      stroke="url(#heartGradient)"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-
-                    {/* Small plus sign at top-right */}
-                    <g transform="translate(14, 2)">
-                      <line x1="2" y1="0" x2="2" y2="4" stroke="#ec4899" strokeWidth="1.2" strokeLinecap="round" />
-                      <line x1="0" y1="2" x2="4" y2="2" stroke="#ec4899" strokeWidth="1.2" strokeLinecap="round" />
-                    </g>
-                  </g>
-                </svg>
-              </div>
-              <span className="text-xs font-semibold text-purple-900 hidden sm:inline">Relationship Profile</span>
+              <Phone className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
           </Link>
 
-          {/* Premium/Payments Button */}
-          <button
-            onClick={() => {
-              const paywallEvent = new CustomEvent('openPaywall');
-              window.dispatchEvent(paywallEvent);
-            }}
-            className="px-3 py-1.5 bg-gradient-to-r from-yellow-400 to-yellow-500 hover:from-yellow-500 hover:to-yellow-600 rounded-full transition-all duration-300 flex items-center gap-1.5 shadow-md hover:shadow-lg hover:scale-105 active:scale-95"
-            title="Upgrade to Premium"
-          >
-            <Crown className="w-4 h-4 text-yellow-900" />
-            <span className="text-xs font-bold text-yellow-900 hidden sm:inline">Premium</span>
-          </button>
-
-          {/* Gallery Button with NEW Badge */}
-          <Link href="/gallery">
-            <button
-              onClick={() => {
-                analytics.track('navbar_click', {
-                  destination: 'gallery',
-                  user_type: user?.premium_user ? 'premium' : 'free'
-                });
-              }}
-              className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-full transition-all duration-300 flex items-center gap-2 border border-white/20 relative group"
-              title="Private Gallery"
-            >
-              <div className="relative">
-                <ImageIcon className="w-5 h-5 sm:w-6 sm:h-6 text-white group-hover:scale-110 transition-transform" />
-                <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-500"></span>
-                </span>
-              </div>
-              <span className="text-xs font-semibold text-white hidden sm:inline flex items-center gap-1">
-                Gallery
-                <span className="px-1.5 py-0.5 rounded-full bg-purple-500 text-[9px] font-bold text-white animate-pulse">
-                  NEW
-                </span>
-              </span>
-            </button>
-          </Link>
-
-          {actionItems.map((item) => (
-            <Link key={item.url} href={item.url}>
-              <button
-                className="p-2 rounded-full text-white hover:bg-white/20 transition-colors"
-                title={item.title}
-                data-testid={`nav-${item.title.toLowerCase()}`}
-              >
-                <item.icon className="w-5 h-5 sm:w-6 sm:h-6" />
-              </button>
-            </Link>
-          ))}
-
-          {/* More Options Dropdown */}
+          {/* Dropdown Menu Trigger */}
           <div className="relative">
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -197,36 +97,89 @@ export function TopNavbar() {
               <MoreVertical className="w-5 h-5 sm:w-6 sm:h-6" />
             </button>
 
-            {/* Dropdown Menu */}
+            {/* Dropdown Menu Content */}
             {isDropdownOpen && (
               <>
-                {/* Backdrop to close dropdown */}
                 <div
                   className="fixed inset-0 z-40"
                   onClick={() => setIsDropdownOpen(false)}
                 />
 
-                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-xl z-50 border border-gray-200">
-                  <div className="py-2">
+                <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-xl z-50 border border-gray-200 overflow-hidden py-1">
+
+                  {/* Relationship Profile */}
+                  <Link href="/summary">
+                    <button className="w-full px-4 py-3 text-left text-gray-700 hover:bg-pink-50 transition-colors flex items-center gap-3">
+                      <div className="text-pink-500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg></div>
+                      <span className="font-medium">Relationship Profile</span>
+                    </button>
+                  </Link>
+
+                  {/* Premium */}
+                  <button
+                    onClick={() => {
+                      setIsDropdownOpen(false);
+                      const paywallEvent = new CustomEvent('openPaywall');
+                      window.dispatchEvent(paywallEvent);
+                    }}
+                    className="w-full px-4 py-3 text-left text-gray-700 hover:bg-yellow-50 transition-colors flex items-center gap-3"
+                  >
+                    <Crown className="w-4 h-4 text-yellow-600" />
+                    <span className="font-medium">Upgrade to Premium</span>
+                  </button>
+
+                  {/* Gallery */}
+                  <Link href="/gallery">
                     <button
                       onClick={() => {
+                        analytics.track('navbar_click', {
+                          destination: 'gallery',
+                          user_type: user?.premium_user ? 'premium' : 'free'
+                        });
                         setIsDropdownOpen(false);
-                        setLocation('/memories');
                       }}
-                      className="w-full px-4 py-2 text-left text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+                      className="w-full px-4 py-3 text-left text-gray-700 hover:bg-purple-50 transition-colors flex items-center gap-3"
                     >
-                      <Video className="w-4 h-4" />
-                      Memories
+                      <ImageIcon className="w-4 h-4 text-purple-600" />
+                      <div className="flex flex-col">
+                        <span className="font-medium">Private Gallery</span>
+                        <span className="text-[10px] text-purple-500 font-bold uppercase">New Content</span>
+                      </div>
                     </button>
+                  </Link>
+
+                  {/* Memories */}
+                  <Link href="/memories">
                     <button
-                      onClick={handleLogout}
-                      className="w-full px-4 py-2 text-left text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
-                      data-testid="nav-logout"
+                      onClick={() => setIsDropdownOpen(false)}
+                      className="w-full px-4 py-3 text-left text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-3"
                     >
-                      <LogOut className="w-4 h-4" />
-                      Logout
+                      <Video className="w-4 h-4 text-gray-500" />
+                      <span className="font-medium">Memories</span>
                     </button>
-                  </div>
+                  </Link>
+
+                  {/* Settings */}
+                  <Link href="/settings">
+                    <button
+                      onClick={() => setIsDropdownOpen(false)}
+                      className="w-full px-4 py-3 text-left text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-3"
+                    >
+                      <Settings className="w-4 h-4 text-gray-500" />
+                      <span className="font-medium">Settings</span>
+                    </button>
+                  </Link>
+
+                  <div className="h-px bg-gray-100 my-1"></div>
+
+                  {/* Logout */}
+                  <button
+                    onClick={handleLogout}
+                    className="w-full px-4 py-3 text-left text-red-600 hover:bg-red-50 transition-colors flex items-center gap-3"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span className="font-medium">Logout</span>
+                  </button>
                 </div>
               </>
             )}

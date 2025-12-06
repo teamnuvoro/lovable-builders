@@ -314,7 +314,7 @@ export default function CallPage() {
         },
         voice: {
           provider: "11labs",
-          voiceId: AI_ASSISTANTS.Riya.voice,
+          voiceId: "21m00Tcm4TlvDq8ikWAM", // Standard Voice (Rachel) to fix audio
         },
         firstMessage: "Hey baby! Kaisi ho tum? I missed talking to you. Aaj kya chal raha hai?"
       });

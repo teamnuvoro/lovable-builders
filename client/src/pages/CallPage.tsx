@@ -103,6 +103,8 @@ export default function CallPage() {
           setCallStatus('connected');
           setStatusText('Connected');
           setSessionDuration(0);
+          // Ensure audio is unmuted
+          vapiRef.current?.setMuted(false);
           startTimer();
         });
 
@@ -325,12 +327,9 @@ Always be warm, supportive, and make the user feel heard and valued.`
           temperature: 0.7,
         },
         voice: {
-          provider: "11labs",
-          voiceId: "EXAVITQu4vr4xnSDxMaL", // Bella - warm, natural, less British
-          stability: 0.6, // More natural and expressive
-          similarityBoost: 0.8, // Closer to original voice characteristics
-          style: 0.5, // Balanced style
-          useSpeakerBoost: true, // Enhanced clarity
+          provider: "openai",
+          voiceId: "alloy", // Reliable fallback voice
+          speed: 1.0,
         },
         firstMessage: "Hey baby! Kaisi ho tum? I missed talking to you. Aaj kya chal raha hai?"
       });

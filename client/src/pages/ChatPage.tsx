@@ -220,26 +220,60 @@ export default function ChatPage() {
         }
 
         if (!response.ok) {
-          throw new Error("Failed to send message");
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to send message");
         }
 
-        const data = await response.json();
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No reader available");
 
-        if (data.error) {
-          throw new Error(data.error);
+        const decoder = new TextDecoder();
+        let aiResponseText = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split("\n");
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const dataStr = line.slice(6);
+              if (dataStr === "[DONE]") continue;
+
+              try {
+                const data = JSON.parse(dataStr);
+
+                if (data.error) throw new Error(data.error);
+
+                if (data.content) {
+                  aiResponseText += data.content;
+                  setStreamingMessage(prev => prev + data.content);
+                }
+
+                if (data.done) {
+                  // Message complete
+                }
+              } catch (e) {
+                // Ignore parse errors for partial chunks
+              }
+            }
+          }
         }
 
         // Update messages with the real response
         queryClient.invalidateQueries({ queryKey: ["messages", session.id] });
         queryClient.invalidateQueries({ queryKey: ["/api/user/usage"] });
 
-        return { success: true, reply: data.reply };
+        return { success: true, reply: aiResponseText };
 
       } catch (error: any) {
         console.error("Chat error:", error);
         throw error;
       } finally {
         setIsTyping(false);
+        setStreamingMessage(""); // Clear streaming message as it will be replaced by real message from query
       }
     },
     onError: (error, variables) => {

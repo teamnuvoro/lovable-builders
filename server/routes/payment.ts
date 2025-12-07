@@ -42,7 +42,7 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
 
     // 3. Create Unique Order
     const orderId = `ORDER_${Date.now()}`;
-    const amount = planType === 'weekly' ? 99 : 29;
+    const amount = planType === 'weekly' ? 49 : 19;
 
     // Generate random valid Indian phone (starts with 9, 8, 7, or 6)
     const randomPhone = '9' + Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');

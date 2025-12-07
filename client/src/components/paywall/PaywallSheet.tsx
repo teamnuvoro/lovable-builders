@@ -91,10 +91,18 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
 
       console.log("🎟️ Received Order Data:", orderData);
 
-      // 2. STOP if ID is missing
+      // 🛑 2. TRAP THE ERROR (Loud Frontend)
+      if (orderData.error) {
+        console.error("Backend Error:", orderData.message);
+        alert("PAYMENT FAILED: " + orderData.message);
+        setIsProcessing(false);
+        return;
+      }
+
+      // 3. Verify Session ID exists
       if (!orderData || !orderData.payment_session_id) {
         console.error("Backend Response missing session ID:", orderData);
-        alert("Payment Error: Could not generate Session ID. Please try again.");
+        alert("Critical Error: Backend returned empty Session ID.");
         setIsProcessing(false); // Reset processing on error
         return;
       }

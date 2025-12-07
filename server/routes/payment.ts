@@ -60,7 +60,12 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
 
   } catch (error: any) {
     console.error('[Payment] Error:', error.message);
-    res.status(500).json({ error: 'Failed to create payment order', details: error.message });
+    // 🛑 LOG THE REAL ERROR AND SEND TO FRONTEND
+    // This matches the 'Loud Backend' requirement to show exact failure reason
+    res.status(500).json({
+      error: true,
+      message: error.message || "Unknown Payment Error"
+    });
   }
 });
 

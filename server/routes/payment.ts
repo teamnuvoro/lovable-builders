@@ -2,10 +2,38 @@ import { Router, Request, Response } from 'express';
 import { createCashfreeOrder, verifyCashfreeSignature } from '../cashfree';
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { getCashfreePlanConfig, getCashfreeBaseUrl } from '../config';
+import crypto from 'crypto';
 
 const router = Router();
-
 const DEV_USER_ID = '00000000-0000-0000-0000-000000000001';
+
+// --- Encryption Helper for UPI ID ---
+function encryptUpiId(upiId: string): string {
+  const algorithm = 'aes-256-cbc';
+  const key = crypto.createHash('sha256').update(String(process.env.SUPABASE_SERVICE_ROLE_KEY)).digest('base64').substr(0, 32);
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv(algorithm, key, iv);
+  let encrypted = cipher.update(upiId, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
+}
+
+// --- Payment Logging Helper ---
+async function logPaymentEvent(userId: string | undefined, eventType: string, transactionId: string | undefined, statusCode: string | number, details: any) {
+  if (!isSupabaseConfigured) return;
+  try {
+    await supabase.from('payment_logs').insert({
+      user_id: userId,
+      transaction_id: transactionId,
+      event_type: eventType,
+      status_code: String(statusCode),
+      timestamp: new Date().toISOString(),
+      details: details
+    });
+  } catch (e) {
+    console.error("⚠️ Failed to log payment event:", e);
+  }
+}
 
 // Get payment configuration
 router.get('/api/payment/config', async (_req: Request, res: Response) => {

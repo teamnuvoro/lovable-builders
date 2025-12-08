@@ -69,21 +69,21 @@ export function ChatHeader({ sessionId, voiceModeEnabled, onVoiceModeToggle, onP
               />
             </div>
             <div className="min-w-0">
-              <h1 className="font-semibold text-base sm:text-lg truncate" data-testid="text-chat-title">Riya</h1>
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 sm:gap-1.5 opacity-90">
-                  <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-300 rounded-full animate-pulse flex-shrink-0"></div>
-                  <p className="text-xs text-white/90 truncate">Online</p>
-                </div>
+                <h1 className="font-semibold text-base sm:text-lg truncate" data-testid="text-chat-title">Riya</h1>
                 {finalUserUsage?.premiumUser ? (
-                  <span className="text-[10px] bg-yellow-400 text-yellow-900 px-1.5 py-0.5 rounded-full font-bold tracking-wide shadow-sm">
+                  <span className="text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-bold tracking-wide shadow-sm flex-shrink-0">
                     PREMIUM
                   </span>
                 ) : (
-                  <span className="text-[10px] bg-white/20 text-white px-1.5 py-0.5 rounded-full font-bold tracking-wide border border-white/30">
+                  <span className="text-xs bg-white/20 text-white px-2 py-0.5 rounded-full font-bold tracking-wide border border-white/30 flex-shrink-0">
                     FREE PLAN
                   </span>
                 )}
+              </div>
+              <div className="flex items-center gap-1 sm:gap-1.5 opacity-90">
+                <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-300 rounded-full animate-pulse flex-shrink-0"></div>
+                <p className="text-xs text-white/90 truncate">Online</p>
               </div>
             </div>
           </div>

@@ -354,25 +354,38 @@ export default function ChatPage() {
   });
 
   const handleSendMessage = (content: string) => {
-    // Client-side Paywall Check
-    if (isLimitReached) {
+    // 1. Strict Check BEFORE updating
+    const currentLocal = getLocalUsage();
+    const effectiveCount = Math.max(currentLocal, messages.length);
+    const isPremiumUser = user?.premium_user || userUsage?.premiumUser;
+
+    if (!isPremiumUser && effectiveCount >= 20) {
+      console.log("Paywall Hit (Pre-check):", effectiveCount);
       setPaywallOpen(true);
       return;
     }
 
+    // 2. Add optimistic message
     const optimisticMsg = addOptimisticMessage(content);
     if (!optimisticMsg) return;
 
-    // Track message sent
+    // 3. Track & Increment
     trackMessageSent(content.length, messages.length + 1);
-
-    // Update local usage immediately so the lock triggers on next render
-    incrementLocalUsage();
+    const newCount = incrementLocalUsage();
 
     analytics.track("message_sent", {
       length: content.length,
       voiceMode: voiceModeEnabled
     });
+
+    // 4. Double check AFTER increment (for the 20th message edge case)
+    if (!isPremiumUser && newCount >= 20) {
+      console.log("Paywall Hit (Post-increment):", newCount);
+      // We allow THIS message to send (as the 20th), but open modal for next.
+      // Or block immediately if you prefer strictness.
+      // Let's let the 20th go through, but trigger state for UI lock.
+      setPaywallOpen(true);
+    }
 
     sendMessageMutation.mutate({
       content,

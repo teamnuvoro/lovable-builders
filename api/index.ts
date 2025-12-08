@@ -39,9 +39,20 @@ app.get("/api/debug", (req, res) => {
     });
 });
 
+// Health check endpoint - MUST be first route for fast Render health checks
+// Simple and fast - no middleware, no async operations
+app.get("/api/health", (_req, res) => {
+    res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Root health check for Render
+app.get("/", (_req, res) => {
+    res.status(200).json({ status: "ok", service: "riya-ai" });
+});
+
 // Authentication routes (OTP-based signup/login)
-// Health check endpoint to verify environment variables
-app.get("/api/health", (req, res) => {
+// Detailed health check endpoint (for debugging)
+app.get("/api/health/detailed", (req, res) => {
     res.json({
         status: "ok",
         env: {

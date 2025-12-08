@@ -30,9 +30,20 @@ app.use((req, res, next) => {
   next();
 });
 
+// Health check endpoint - MUST be first route for fast Render health checks
+// Simple and fast - no middleware, no async operations
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Root health check for Render
+app.get("/", (_req, res) => {
+  res.status(200).json({ status: "ok", service: "riya-ai" });
+});
+
 // Authentication routes (OTP-based signup/login)
-// Health check endpoint to verify environment variables
-app.get("/api/health", (req, res) => {
+// Detailed health check endpoint (for debugging)
+app.get("/api/health/detailed", (req, res) => {
   res.json({
     status: "ok",
     env: {
@@ -43,7 +54,7 @@ app.get("/api/health", (req, res) => {
       TWILIO_SID: !!process.env.TWILIO_ACCOUNT_SID,
       VAPI_KEY: !!process.env.VAPI_PRIVATE_KEY,
       CASHFREE_ID: !!process.env.CASHFREE_APP_ID,
-      AMPLITUDE_KEY: !!process.env.VITE_AMPLITUDE_API_KEY, // Check if server sees this (it might not, but client should)
+      AMPLITUDE_KEY: !!process.env.VITE_AMPLITUDE_API_KEY,
     },
     timestamp: new Date().toISOString()
   });

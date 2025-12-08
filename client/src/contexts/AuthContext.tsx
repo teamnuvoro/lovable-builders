@@ -43,9 +43,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Check active session
-    supabase.auth.getSession().then(({ data: { session } }: { data: { session: any } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, session.user);
       } else {
         setIsLoading(false);
       }
@@ -53,9 +53,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event: string, session: any) => {
+      (_event, session) => {
         if (session?.user) {
-          fetchProfile(session.user.id);
+          fetchProfile(session.user.id, session.user);
         } else {
           setUser(null);
           setIsLoading(false);
@@ -67,24 +67,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string, sessionUser?: any) => {
     try {
+      // Use maybeSingle() to avoid 406 Error if row is missing/hidden
       const { data, error } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) {
-        if (error.code === 'PGRST116') {
-          // Profile doesn't exist, create it
-          console.error('Profile missing for user:', userId);
-          // Allow the app to handle the missing profile state (likely redirects to login)
-          setUser(null);
-        } else {
-          console.error('Error fetching user profile:', error);
-        }
-      } else {
+        console.warn('Error fetching user profile (DB):', error.message);
+      }
+
+      if (data) {
         setUser(data as User);
         // Identify in analytics
         analytics.identifyUser(data.id, {
@@ -93,9 +89,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           gender: data.gender,
           premium: data.premium_user,
         });
+      } else if (sessionUser) {
+        // Fallback: Construct user from Session Metadata if DB is inaccessible (RLS or missing)
+        console.log('Falling back to session metadata for user:', userId);
+        const metadata = sessionUser.user_metadata || {};
+
+        const fallbackUser: User = {
+          id: sessionUser.id,
+          name: metadata.name || sessionUser.email?.split('@')[0] || 'User',
+          email: sessionUser.email || '',
+          phone_number: sessionUser.phone || metadata.phone_number,
+          gender: metadata.gender || 'prefer_not_to_say',
+          persona: metadata.persona || 'sweet_supportive',
+          premium_user: false, // Default to false if we can't check DB
+          onboarding_complete: true,
+          created_at: sessionUser.created_at,
+          updated_at: sessionUser.last_sign_in_at || new Date().toISOString()
+        };
+
+        setUser(fallbackUser);
+      } else {
+        // No data and no session user to fall back on
+        console.error('Profile missing and no session metadata available.');
+        setUser(null);
       }
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      console.error('Exception fetching profile:', error);
+      setUser(null);
     } finally {
       setIsLoading(false);
     }

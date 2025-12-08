@@ -84,10 +84,19 @@ export default function ChatPage() {
     queryFn: async () => {
       const res = await fetch(`/api/messages?sessionId=${session?.id}`);
       if (!res.ok) return [];
-      return res.json();
+      const rawMessages = await res.json();
+      // Map backend format to frontend Message interface
+      return rawMessages.map((msg: any) => ({
+        id: msg.id,
+        sessionId: msg.session_id || msg.sessionId,
+        content: msg.text || msg.content, // Fallback for various backend formats
+        role: msg.role === 'ai' ? 'assistant' : msg.role, // normalize 'ai' -> 'assistant'
+        createdAt: new Date(msg.created_at || msg.createdAt),
+        tag: msg.tag
+      }));
     },
-    refetchInterval: false, // Disable auto-refetch to prevent message disappearing
-    staleTime: 30000, // Consider data fresh for 30 seconds
+    refetchInterval: false,
+    staleTime: 30000,
   });
 
   // Track chat opened and session started (after session and messages are defined)

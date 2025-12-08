@@ -273,6 +273,11 @@ router.post("/api/chat", async (req: Request, res: Response) => {
   try {
     const { content, sessionId, userId } = req.body;
 
+    console.log("------------------------------------------");
+    console.log(`[Chat] Request received. User: ${userId}`);
+    console.log(`[Chat] Server Mode: ${isSupabaseConfigured ? 'SUPABASE (Enforcing Limits)' : 'IN-MEMORY (NO LIMITS - BYPASSING PAYWALL)'}`);
+    console.log("------------------------------------------");
+
     if (!userId) {
       return res.status(401).json({ error: "User unauthorized" });
     }

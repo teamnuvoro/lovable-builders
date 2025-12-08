@@ -222,19 +222,23 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
 
     // Update subscription status
     const paymentStatus = paymentData.order_status;
-    const isPaid = paymentStatus === 'PAID';
+    // Accept multiple statuses that indicate successful payment
+    const isPaid = paymentStatus === 'PAID' || paymentStatus === 'ACTIVE' || paymentStatus === 'SUCCESS';
+    
+    // Also check if subscription is already marked as active (webhook might have processed it)
+    const isAlreadyActive = subscription.status === 'active';
 
     await supabase
       .from('subscriptions')
       .update({
-        status: isPaid ? 'active' : 'failed',
-        cashfree_payment_id: paymentData.cf_order_id,
+        status: isPaid || isAlreadyActive ? 'active' : subscription.status,
+        cashfree_payment_id: paymentData.cf_payment_id || paymentData.cf_order_id || subscription.cashfree_payment_id,
         updated_at: new Date().toISOString()
       })
       .eq('cashfree_order_id', orderId);
 
-    // Update user premium status if paid
-    if (isPaid) {
+    // Update user premium status if paid OR if subscription is already active
+    if (isPaid || isAlreadyActive) {
       // Calculate expiry
       const now = new Date();
       let expiry = new Date();
@@ -282,14 +286,17 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
       await logPaymentEvent(subscription.user_id, 'ENTITLEMENT_GRANTED', orderId, 200, { status: paymentData.order_status, expiry: expiry.toISOString() });
     }
 
+    // Return success if payment is paid OR subscription is already active
+    const success = isPaid || isAlreadyActive;
+    
     res.json({
-      success: isPaid,
+      success: success,
       status: paymentStatus,
       orderId,
       planType: subscription.plan_type,
       startDate: subscription.start_date,
       endDate: subscription.end_date,
-      message: isPaid ? 'Payment successful! You are now a premium user.' : 'Payment pending or failed'
+      message: success ? 'Payment successful! You are now a premium user.' : 'Payment pending or failed'
     });
 
   } catch (error: any) {

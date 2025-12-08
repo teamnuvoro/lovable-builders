@@ -25,6 +25,7 @@ interface AuthContextType {
   user: User | null;
   login: (user: User) => void;
   logout: () => void;
+  refetchUser: () => Promise<void>;
   isAuthenticated: boolean;
   isLoading: boolean;
 }
@@ -126,6 +127,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     analytics.track("login_completed", { method: "manual" });
   };
 
+  const refetchUser = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await fetchProfile(session.user.id, session.user);
+      }
+    } catch (error) {
+      console.error('Error refetching user:', error);
+    }
+  };
+
   const logout = async () => {
     try {
       console.log('🚪 Logging out...');
@@ -151,6 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         login,
         logout,
+        refetchUser,
         isAuthenticated: !!user,
         isLoading,
       }}

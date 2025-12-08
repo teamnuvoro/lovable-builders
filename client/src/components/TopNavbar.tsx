@@ -124,21 +124,6 @@ export function TopNavbar() {
                       </button>
                     </Link>
 
-                    {/* Premium */}
-                    <button
-                      onClick={() => {
-                        setIsDropdownOpen(false);
-                        const paywallEvent = new CustomEvent('openPaywall');
-                        window.dispatchEvent(paywallEvent);
-                      }}
-                      className="w-full px-4 py-3 text-left text-gray-700 hover:bg-yellow-50 transition-colors flex items-center gap-3 group"
-                    >
-                      <div className="p-2 bg-yellow-100 rounded-full group-hover:bg-yellow-200 transition-colors">
-                        <Crown className="w-4 h-4 text-yellow-600" />
-                      </div>
-                      <span className="font-medium text-sm">Upgrade to Premium</span>
-                    </button>
-
                     {/* Gallery */}
                     <Link href="/gallery">
                       <button

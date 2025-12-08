@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { ArrowLeft, Phone, Video, Volume2, VolumeX, Sparkles } from "lucide-react";
+import { ArrowLeft, Phone, Video, Volume2, VolumeX, Sparkles, Crown } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -100,8 +100,26 @@ export function ChatHeader({ sessionId, voiceModeEnabled, onVoiceModeToggle, onP
           </div>
         </div>
 
-        {/* Right: Analyze My Type and Call icons */}
+        {/* Right: Upgrade to Premium, Analyze My Type and Call icons */}
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+          {!isPremium && (
+            <button
+              onClick={() => {
+                if (onPaymentClick) {
+                  onPaymentClick();
+                } else {
+                  const paywallEvent = new CustomEvent('openPaywall');
+                  window.dispatchEvent(paywallEvent);
+                }
+              }}
+              className="px-2 sm:px-3 py-1 sm:py-1.5 bg-gradient-to-r from-yellow-400 to-yellow-500 hover:from-yellow-500 hover:to-yellow-600 rounded-full transition-all duration-300 flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-bold text-yellow-900 shadow-md hover:shadow-lg hover:scale-105 active:scale-95"
+              title="Upgrade to Premium"
+              data-testid="button-upgrade-premium"
+            >
+              <Crown className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+              <span className="hidden sm:inline">Premium</span>
+            </button>
+          )}
           {!hideAnalytics && (
             <Link href="/analytics">
               <button

@@ -179,6 +179,18 @@ export function ChatInput({
                 }`}
               data-testid="input-chat-message"
             />
+            {disabled && (
+              <button
+                onClick={() => {
+                  const paywallEvent = new CustomEvent('openPaywall');
+                  window.dispatchEvent(paywallEvent);
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-gradient-to-r from-yellow-400 to-yellow-500 hover:from-yellow-500 hover:to-yellow-600 text-yellow-900 text-xs font-bold rounded-full transition-all duration-300 shadow-md hover:shadow-lg hover:scale-105 active:scale-95 whitespace-nowrap"
+                data-testid="button-upgrade-in-input"
+              >
+                Upgrade
+              </button>
+            )}
           </div>
 
           <button

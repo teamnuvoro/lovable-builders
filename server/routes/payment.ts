@@ -334,33 +334,84 @@ router.post('/api/payment/webhook', async (req: Request, res: Response) => {
       const orderId = data.order?.order_id;
 
       if (orderId && isSupabaseConfigured) {
-        const { data: subscription } = await supabase
+        // Get subscription with full details
+        const { data: subscription, error: subError } = await supabase
           .from('subscriptions')
-          .select('user_id')
+          .select('id, user_id, plan_type, amount, started_at, created_at, expires_at')
           .eq('cashfree_order_id', orderId)
           .single();
 
-        if (subscription) {
-          // Update subscription
-          await supabase
+        if (subscription && !subError) {
+          // Calculate expiry
+          let expiry = new Date();
+          if (subscription.plan_type === 'weekly') {
+            expiry.setDate(expiry.getDate() + 7);
+          } else {
+            expiry.setTime(expiry.getTime() + 24 * 60 * 60 * 1000);
+          }
+
+          // Update subscription status (triggers will handle user upgrade)
+          const { error: updateError } = await supabase
             .from('subscriptions')
             .update({
               status: 'active',
               cashfree_payment_id: data.payment?.cf_payment_id,
+              expires_at: subscription.expires_at || expiry.toISOString(),
               updated_at: new Date().toISOString()
             })
             .eq('cashfree_order_id', orderId);
 
-          // Upgrade user to premium
-          await supabase
+          if (updateError) {
+            console.error('[Payment Webhook] Error updating subscription:', updateError);
+          }
+
+          // Also directly update user (backup in case triggers don't fire)
+          const { error: userError } = await supabase
             .from('users')
             .update({
               premium_user: true,
+              subscription_plan: subscription.plan_type,
+              subscription_expiry: subscription.expires_at || expiry.toISOString(),
               updated_at: new Date().toISOString()
             })
             .eq('id', subscription.user_id);
 
-          console.log('[Payment Webhook] ✅ User upgraded:', subscription.user_id);
+          if (userError) {
+            console.error('[Payment Webhook] Error updating user:', userError);
+          } else {
+            console.log('[Payment Webhook] ✅ User upgraded:', subscription.user_id, 'Plan:', subscription.plan_type);
+          }
+
+          // Insert/update payment record
+          const { data: existingPayment } = await supabase
+            .from('payments')
+            .select('id')
+            .eq('cashfree_order_id', orderId)
+            .single();
+
+          if (!existingPayment) {
+            await supabase.from('payments').insert({
+              user_id: subscription.user_id,
+              subscription_id: subscription.id,
+              cashfree_order_id: orderId,
+              cashfree_payment_id: data.payment?.cf_payment_id,
+              amount: subscription.amount || 0,
+              status: 'success',
+              plan_type: subscription.plan_type,
+              created_at: new Date().toISOString()
+            });
+          } else {
+            await supabase
+              .from('payments')
+              .update({
+                status: 'success',
+                cashfree_payment_id: data.payment?.cf_payment_id,
+                updated_at: new Date().toISOString()
+              })
+              .eq('cashfree_order_id', orderId);
+          }
+        } else {
+          console.warn('[Payment Webhook] Subscription not found for order:', orderId);
         }
       }
     }
@@ -369,7 +420,73 @@ router.post('/api/payment/webhook', async (req: Request, res: Response) => {
 
   } catch (error: any) {
     console.error('[Payment Webhook] Error:', error);
-    res.status(500).json({ error: 'Webhook processing failed' });
+    res.status(500).json({ error: 'Webhook processing failed', details: error.message });
+  }
+});
+
+// Manual fix endpoint - Fix specific user's premium status
+router.post('/api/payment/fix-user', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    if (!isSupabaseConfigured) {
+      return res.status(503).json({ error: 'Database not configured' });
+    }
+
+    // Call the database function
+    const { data, error } = await supabase.rpc('fix_user_premium_status', {
+      p_user_id: userId
+    });
+
+    if (error) {
+      console.error('[Fix User] Error:', error);
+      return res.status(500).json({ error: 'Failed to fix user', details: error.message });
+    }
+
+    res.json({
+      success: true,
+      result: data
+    });
+
+  } catch (error: any) {
+    console.error('[Fix User] Error:', error);
+    res.status(500).json({ error: 'Failed to fix user', details: error.message });
+  }
+});
+
+// Manual fix endpoint - Fix all users with active subscriptions
+router.post('/api/payment/fix-all', async (req: Request, res: Response) => {
+  try {
+    if (!isSupabaseConfigured) {
+      return res.status(503).json({ error: 'Database not configured' });
+    }
+
+    // Call the database function
+    const { data, error } = await supabase.rpc('fix_all_paid_users');
+
+    if (error) {
+      console.error('[Fix All] Error:', error);
+      return res.status(500).json({ error: 'Failed to fix users', details: error.message });
+    }
+
+    const upgraded = data?.filter((r: any) => r.upgraded).length || 0;
+    const failed = data?.filter((r: any) => !r.upgraded).length || 0;
+
+    res.json({
+      success: true,
+      upgraded,
+      failed,
+      total: data?.length || 0,
+      results: data
+    });
+
+  } catch (error: any) {
+    console.error('[Fix All] Error:', error);
+    res.status(500).json({ error: 'Failed to fix users', details: error.message });
   }
 });
 

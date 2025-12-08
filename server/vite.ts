@@ -82,18 +82,45 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(import.meta.dirname, "public");
+  // Try multiple possible build paths
+  const possiblePaths = [
+    path.resolve(import.meta.dirname, "../dist/public"),
+    path.resolve(import.meta.dirname, "public"),
+    path.resolve(process.cwd(), "dist/public"),
+    path.resolve(process.cwd(), "public"),
+  ];
 
-  if (!fs.existsSync(distPath)) {
-    throw new Error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`,
-    );
+  let distPath: string | null = null;
+  for (const buildPath of possiblePaths) {
+    if (fs.existsSync(buildPath) && fs.existsSync(path.join(buildPath, "index.html"))) {
+      distPath = buildPath;
+      console.log(`[Static Files] Serving from: ${distPath}`);
+      break;
+    }
   }
 
-  app.use(express.static(distPath));
+  if (!distPath) {
+    console.warn(`[Static Files] ⚠️  Build directory not found! Tried:`, possiblePaths);
+    console.warn(`[Static Files] Frontend will not be served. Make sure to run 'npm run build' first.`);
+    return; // Don't crash, just warn
+  }
 
-  // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
+  // Serve static files with no cache
+  app.use(express.static(distPath, { maxAge: 0 }));
+
+  // Fall through to index.html for SPA routing (but skip API routes)
+  app.use("*", (req, res, next) => {
+    // Skip API routes
+    if (req.path.startsWith("/api")) {
+      return next();
+    }
+    
+    // Serve index.html for all other routes
+    res.sendFile(path.resolve(distPath!, "index.html"), (err) => {
+      if (err) {
+        console.error(`[Static Files] Error serving index.html:`, err);
+        next();
+      }
+    });
   });
 }

@@ -22,11 +22,6 @@ app.get("/api/health", (_req, res) => {
     res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Root health check for Render
-app.get("/", (_req, res) => {
-    res.status(200).json({ status: "ok", service: "riya-ai" });
-});
-
 // Middleware (after health checks)
 app.use(ensureSecretsLoaded);
 app.use(express.json());
@@ -149,39 +144,73 @@ app.patch("/api/user/personality", async (req, res) => {
 
 
 
-// Serve static files from the React app build directory
+// =====================================================
+// STATIC FILE SERVING - Serve frontend (MUST BE LAST)
+// =====================================================
 import path from "path";
-const clientBuildPath = path.join(__dirname, "public");
-app.use(express.static(clientBuildPath));
+import fs from "fs";
 
-// For any other request, send back index.html (SPA routing)
-// BUT only if it's not an API request
-app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api")) {
-        return next();
+// Try multiple possible build paths
+const possiblePaths = [
+    path.join(__dirname, "../dist/public"),
+    path.join(__dirname, "public"),
+    path.join(process.cwd(), "dist/public"),
+    path.join(process.cwd(), "public"),
+];
+
+let clientBuildPath: string | null = null;
+for (const buildPath of possiblePaths) {
+    if (fs.existsSync(buildPath) && fs.existsSync(path.join(buildPath, "index.html"))) {
+        clientBuildPath = buildPath;
+        console.log(`[Static Files] ✅ Serving frontend from: ${clientBuildPath}`);
+        break;
     }
-    res.sendFile(path.join(clientBuildPath, "index.html"), (err) => {
-        if (err) {
-            next();
-        }
-    });
-});
+}
 
-// Catch-all for debugging 404s (API only)
-app.use("*", (req, res) => {
-    console.log(`[404] ${req.method} ${req.originalUrl} - No route matched`);
-    res.status(404).json({
-        error: "Route not found",
-        path: req.originalUrl,
-        method: req.method,
-        availableRoutes: [
-            "/api/auth/session",
-            "/api/auth/login",
-            "/api/debug",
-            "/api/health",
-            "/api/test-chat"
-        ]
+if (clientBuildPath) {
+    // Serve static files (CSS, JS, images, etc.)
+    app.use(express.static(clientBuildPath, { maxAge: 0 }));
+    
+    // For any non-API request, send back index.html (SPA routing)
+    app.get("*", (req, res, next) => {
+        // Skip API routes - let them be handled by API routes above
+        if (req.path.startsWith("/api")) {
+            return next();
+        }
+        
+        // Serve index.html for all frontend routes
+        const indexPath = path.join(clientBuildPath!, "index.html");
+        res.sendFile(indexPath, (err) => {
+            if (err) {
+                console.error(`[Static Files] ❌ Error serving index.html:`, err);
+                next();
+            }
+        });
     });
+} else {
+    console.warn("[Static Files] ⚠️  Build directory not found! Frontend will not be served.");
+    console.warn("[Static Files] Tried paths:", possiblePaths);
+    console.warn("[Static Files] Make sure to run 'npm run build' before deploying.");
+}
+
+// Catch-all for API 404s only
+app.use("*", (req, res) => {
+    // Only return JSON for API routes
+    if (req.path.startsWith("/api")) {
+        console.log(`[404] ${req.method} ${req.originalUrl} - No API route matched`);
+        res.status(404).json({
+            error: "API route not found",
+            path: req.originalUrl,
+            method: req.method
+        });
+    } else {
+        // For non-API routes, try to serve index.html if we have it
+        if (clientBuildPath) {
+            res.sendFile(path.join(clientBuildPath, "index.html"));
+        } else {
+            res.status(404).send("Frontend not found. Please build the client first (npm run build).");
+        }
+    }
 });
 
 // Add a simple test route to verify the server is running and reachable

@@ -261,26 +261,44 @@ export default function ChatPage() {
         }
 
         // Message complete - Update Cache Manually to prevent flicker
-        const completedMessage = {
-          id: generateTempId(), // Temporary ID until refetch
+        const userMessage: Message = {
+          id: optimisticId, // Use the ID we already have
+          content: content,
+          role: 'user',
+          sessionId: session.id,
+          createdAt: new Date(),
+          tag: 'general'
+        };
+
+        const aiMessage: Message = {
+          id: generateTempId(),
           content: aiResponseText,
           role: 'assistant',
           sessionId: session.id,
-          createdAt: new Date()
+          createdAt: new Date(),
+          tag: 'general'
         };
 
+        // Manually update the cache with BOTH messages
         queryClient.setQueryData(['messages', session.id], (old: Message[] | undefined) => {
-          if (!old) return [completedMessage];
-          // Check if already exists to avoid dupes (unlikely with temp ID)
-          return [...old, completedMessage];
+          const current = old || [];
+          // Filter out any potential duplicates by ID or content/role match
+          const exists = current.some(m => m.id === userMessage.id);
+          const newMessages = exists ? current : [...current, userMessage];
+          return [...newMessages, aiMessage];
         });
 
         // NOW clear streaming so we don't duplicate
         setStreamingMessage("");
 
-        // Then re-fetch for truth
-        queryClient.invalidateQueries({ queryKey: ["messages", session.id] });
+        // OPTIONAL: Invalidate strictly for message count/usage, but NOT messages list immediately
+        // to avoid "pop-in/pop-out" effect due to replication lag.
         queryClient.invalidateQueries({ queryKey: ["/api/user/usage"] });
+
+        // We can refetch messages quietly in the background later if needed
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ["messages", session.id] });
+        }, 2000);
 
         return { success: true, reply: aiResponseText };
 

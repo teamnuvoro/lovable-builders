@@ -94,11 +94,22 @@ async function getUserMessageCount(userId: string): Promise<number> {
   try {
     const { data: usage } = await supabase
       .from('usage_stats')
-      .select('total_messages')
+      .select('daily_messages_count, last_daily_reset, total_messages')
       .eq('user_id', userId)
       .single();
 
-    return usage?.total_messages || 0;
+    if (!usage) return 0;
+
+    // Check for daily reset (logic: if last reset was previous day, count is 0)
+    const lastReset = usage.last_daily_reset ? new Date(usage.last_daily_reset) : new Date(0);
+    const now = new Date();
+
+    // Reset if it's a different day (simple midnight reset)
+    if (lastReset.toDateString() !== now.toDateString()) {
+      return 0;
+    }
+
+    return usage.daily_messages_count || 0;
   } catch {
     return 0;
   }
@@ -110,18 +121,27 @@ async function incrementMessageCount(userId: string): Promise<void> {
   try {
     const { data: current } = await supabase
       .from('usage_stats')
-      .select('total_messages, total_call_seconds')
+      .select('*')
       .eq('user_id', userId)
       .single();
+
+    const now = new Date();
+    const lastReset = current?.last_daily_reset ? new Date(current.last_daily_reset) : new Date(0);
+    const isSameDay = lastReset.toDateString() === now.toDateString();
+
+    const newDailyCount = isSameDay ? (current?.daily_messages_count || 0) + 1 : 1;
+    const newResetDate = isSameDay ? current?.last_daily_reset : now.toISOString();
 
     await supabase
       .from('usage_stats')
       .upsert({
         user_id: userId,
+        daily_messages_count: newDailyCount,
+        last_daily_reset: newResetDate,
         total_messages: (current?.total_messages || 0) + 1,
         total_call_seconds: current?.total_call_seconds || 0,
         updated_at: new Date().toISOString()
-      });
+      }, { onConflict: 'user_id' }); // Ensure we match on user_id
   } catch (error) {
     console.error('[incrementMessageCount] Error:', error);
   }

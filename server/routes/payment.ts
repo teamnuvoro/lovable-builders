@@ -19,16 +19,31 @@ function encryptUpiId(upiId: string): string {
 }
 
 // --- Payment Logging Helper ---
+// --- Payment Logging Helper ---
 async function logPaymentEvent(userId: string | undefined, eventType: string, transactionId: string | undefined, statusCode: string | number, details: any) {
   if (!isSupabaseConfigured) return;
   try {
+    // Sanitize PII
+    const sanitized = JSON.parse(JSON.stringify(details));
+    if (sanitized?.payment_method?.upi) {
+      sanitized.payment_method.upi = '***MASKED***';
+    }
+    if (sanitized?.customer_details) {
+      if (sanitized.customer_details.customer_phone) sanitized.customer_details.customer_phone = '***MASKED***';
+      if (sanitized.customer_details.customer_email) sanitized.customer_details.customer_email = '***MASKED***';
+    }
+    // Also check for 'data' wrapper common in webhooks
+    if (sanitized?.data?.payment?.payment_method?.upi) {
+      sanitized.data.payment.payment_method.upi = '***MASKED***';
+    }
+
     await supabase.from('payment_logs').insert({
       user_id: userId,
       transaction_id: transactionId,
       event_type: eventType,
       status_code: String(statusCode),
       timestamp: new Date().toISOString(),
-      details: details
+      details: sanitized
     });
   } catch (e) {
     console.error("⚠️ Failed to log payment event:", e);
@@ -78,6 +93,9 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
     console.log("🚀 Sending request to Cashfree:", { orderId, amount, phone: randomPhone });
 
     // 4. INSERT SUBSCRIPTION RECORD BEFORE CALLING GATEWAY
+    // Log Initiation
+    await logPaymentEvent(userId, 'PAYMENT_INITIATED', orderId, 200, { planType, amount });
+
     // This is the critical fix. We must have a record to verify against later.
     if (isSupabaseConfigured) {
       const startDate = new Date();
@@ -226,6 +244,21 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
         .eq('id', subscription.user_id);
 
       console.log('[Payment] ✅ User upgraded to premium:', subscription.user_id);
+
+      // INSERT INTO PAYMENTS TABLE (DATA INTEGRITY)
+      await supabase.from('payments').insert({
+        user_id: subscription.user_id,
+        subscription_id: subscription.id,
+        cashfree_order_id: orderId,
+        cashfree_payment_id: paymentData.cf_payment_id || 'UNKNOWN',
+        amount: subscription.amount,
+        status: 'success',
+        plan_type: subscription.plan_type,
+        created_at: new Date().toISOString()
+      });
+
+      // Log Event
+      await logPaymentEvent(subscription.user_id, 'ENTITLEMENT_GRANTED', orderId, 200, { status: paymentData.order_status });
     }
 
     res.json({

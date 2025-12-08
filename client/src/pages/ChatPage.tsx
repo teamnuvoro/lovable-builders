@@ -169,7 +169,9 @@ export default function ChatPage() {
   const isDev = import.meta.env.MODE === 'development';
   // Use userUsage to check limit. Fallback to messages.length if usage not yet loaded but we have messages.
   const currentCount = userUsage?.messageCount || messages.length || 0;
-  const isLimitReached = !user?.premium_user && currentCount >= 20;
+  // Check premium status from both Auth context (cached) and Usage API (live)
+  const isPremium = user?.premium_user || userUsage?.premiumUser || false;
+  const isLimitReached = !isPremium && currentCount >= 20;
 
   const generateTempId = () => `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 

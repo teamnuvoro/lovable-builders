@@ -554,4 +554,38 @@ export const insertUserEventSchema = createInsertSchema(userEvents).omit({
 });
 
 export type InsertUserEvent = z.infer<typeof insertUserEventSchema>;
-export type UserEvent = typeof userEvents.$inferSelect;
+// Payment Logs Table (Audit Trail)
+export const paymentLogs = pgTable("payment_logs", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+  transactionId: text("transaction_id"),
+  eventType: text("event_type").notNull(),
+  statusCode: text("status_code"),
+  timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+  details: jsonb("details"),
+});
+
+export const insertPaymentLogSchema = createInsertSchema(paymentLogs).omit({
+  id: true,
+  timestamp: true,
+});
+
+export type InsertPaymentLog = z.infer<typeof insertPaymentLogSchema>;
+export type PaymentLog = typeof paymentLogs.$inferSelect;
+
+// User Payment Methods Table (Secure UPI Storage)
+export const userPaymentMethods = pgTable("user_payment_methods", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  upiId: text("upi_id"), // Encrypted string
+  lastUsed: timestamp("last_used", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+export const insertUserPaymentMethodSchema = createInsertSchema(userPaymentMethods).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUserPaymentMethod = z.infer<typeof insertUserPaymentMethodSchema>;
+export type UserPaymentMethod = typeof userPaymentMethods.$inferSelect;

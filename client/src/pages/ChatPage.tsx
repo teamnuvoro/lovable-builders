@@ -114,32 +114,17 @@ export default function ChatPage() {
       );
 
       setOptimisticMessages(prev =>
-        prev.filter(optMsg =>
-          !serverMessageContents.has(optMsg.content.trim().toLowerCase())
-        )
+        prev.filter(optMsg => {
+          // If the message is very recent (< 5 seconds), keep it to avoid flickering
+          const isRecent = new Date().getTime() - optMsg.createdAt.getTime() < 5000;
+          if (isRecent) return true;
+
+          // Otherwise, remove it if it exists in the server list
+          return !serverMessageContents.has(optMsg.content.trim().toLowerCase());
+        })
       );
     }
-
-    // Clear streaming message if we have a matching AI message in the list
-    if (streamingMessage && messages.length > 0) {
-      const streamingText = streamingMessage.trim().toLowerCase();
-      const hasMatchingMessage = messages.some(msg => {
-        if (msg.role !== 'ai') return false;
-        const msgText = ((msg as any).content || msg.text || '').trim().toLowerCase();
-        // Check if messages match (allowing for small differences)
-        return msgText.length > 0 && (
-          msgText === streamingText ||
-          msgText.includes(streamingText.substring(0, Math.min(30, streamingText.length))) ||
-          streamingText.includes(msgText.substring(0, Math.min(30, msgText.length)))
-        );
-      });
-
-      if (hasMatchingMessage) {
-        console.log('[Chat] Found matching message in list, clearing streaming message');
-        setStreamingMessage("");
-      }
-    }
-  }, [messages, streamingMessage]);
+  }, [messages, optimisticMessages]);
 
   interface UserUsage {
     messageCount: number;

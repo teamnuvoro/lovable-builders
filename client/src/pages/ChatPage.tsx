@@ -195,6 +195,18 @@ export default function ChatPage() {
 
   // Check premium status
   const isPremium = user?.premium_user || userUsage?.premiumUser || false;
+
+  // DEBUG: Log status on mount
+  useEffect(() => {
+    console.log("------------------------------------------");
+    console.log("DEBUG: ChatPage Mount");
+    console.log("DEBUG: Local Count (Storage):", localCount);
+    console.log("DEBUG: Backend Count (Api):", backendCount);
+    console.log("DEBUG: Current Count (Max):", currentCount);
+    console.log("DEBUG: Is Premium:", isPremium);
+    console.log("------------------------------------------");
+  }, [localCount, backendCount, currentCount, isPremium]);
+
   // STRICT LIMIT CHECK
   const isLimitReached = !isPremium && currentCount >= 20;
 

@@ -47,6 +47,11 @@ export function ChatHeader({ sessionId, voiceModeEnabled, onVoiceModeToggle, onP
 
   return (
     <header className="gradient-header text-white px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between shadow-lg relative overflow-hidden w-full">
+      {/* DEBUG BADGE: Absolute Position to verify deployment */}
+      <div className="absolute top-0 left-1/2 transform -translate-x-1/2 z-[100] bg-black/50 text-white text-[9px] px-2 py-0.5 rounded-b-lg font-mono pointer-events-none">
+        {isPremium ? 'PREMIUM' : 'FREE PLAN'}
+      </div>
+
       {/* Animated background gradient */}
       <div className="absolute inset-0 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-600 animate-gradient opacity-100"></div>
       <div className="relative z-10 w-full flex items-center justify-between gap-2 sm:gap-4">

@@ -228,13 +228,26 @@ export default function PaymentCallback() {
             <h2 className="text-2xl font-bold text-green-600" data-testid="text-payment-status">Payment Successful!</h2>
             <p className="text-muted-foreground" data-testid="text-payment-message">{message}</p>
             <p className="text-sm text-green-600 font-medium">Redirecting to chat...</p>
-            <Button
-              onClick={handleContinue}
-              className="w-full"
-              data-testid="button-continue"
-            >
-              Go to Chat Now
-            </Button>
+            <div className="space-y-2">
+              <Button
+                onClick={handleContinue}
+                className="w-full"
+                data-testid="button-continue"
+              >
+                Go to Chat Now
+              </Button>
+              <Button
+                onClick={() => {
+                  // Force hard refresh to ensure all data is fresh
+                  window.location.href = '/chat?paymentSuccess=true&t=' + Date.now();
+                }}
+                variant="outline"
+                className="w-full"
+                data-testid="button-refresh"
+              >
+                Refresh & Go to Chat
+              </Button>
+            </div>
           </>
         )}
 

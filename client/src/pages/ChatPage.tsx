@@ -14,6 +14,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { Skeleton } from "@/components/ui/skeleton";
 import { analytics } from "@/lib/analytics";
 import { useLocation } from "wouter";
+import { FeedbackModal } from "@/components/FeedbackModal";
 import {
   trackChatOpened,
   trackMessageSent,

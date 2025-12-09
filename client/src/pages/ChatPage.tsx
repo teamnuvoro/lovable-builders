@@ -279,6 +279,19 @@ export default function ChatPage() {
     });
   }, [isPremium, currentCount, isLimitReached]);
 
+  // Smart trigger: Open feedback modal 10 seconds after paywall is hit
+  useEffect(() => {
+    if (isLimitReached && !paywallTriggered) {
+      setPaywallTriggered(true);
+      const timer = setTimeout(() => {
+        setShowFeedbackModal(true);
+      }, 10000); // 10 seconds delay
+      return () => clearTimeout(timer);
+    } else if (!isLimitReached) {
+      setPaywallTriggered(false);
+    }
+  }, [isLimitReached, paywallTriggered]);
+
   const generateTempId = () => `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   const addOptimisticMessage = useCallback((content: string) => {

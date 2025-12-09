@@ -86,8 +86,11 @@ router.post('/api/auth/send-otp', async (req: Request, res: Response) => {
             });
         }
 
-        // Check if user already exists (skip in dev mode for easier testing)
-        const skipDuplicateCheck = process.env.NODE_ENV === 'development' && process.env.SKIP_DUPLICATE_CHECK === 'true';
+        // Check if this is a test phone number
+        const isTestNumber = isTestPhoneNumber(cleanPhone);
+        
+        // Check if user already exists (skip in dev mode or for test numbers)
+        const skipDuplicateCheck = (process.env.NODE_ENV === 'development' && process.env.SKIP_DUPLICATE_CHECK === 'true') || isTestNumber;
 
         if (isSupabaseConfigured && !skipDuplicateCheck) {
             const { data: existingUser } = await supabase
@@ -104,6 +107,11 @@ router.post('/api/auth/send-otp', async (req: Request, res: Response) => {
                     existingPhone: existingUser.phone_number
                 });
             }
+        }
+        
+        // For test numbers, allow multiple signups (useful for testing)
+        if (isTestNumber) {
+            console.log('[TEST MODE] Test number detected - allowing signup even if user exists');
         }
 
         // Generate OTP
@@ -321,8 +329,18 @@ router.post('/api/auth/verify-login-otp', async (req: Request, res: Response) =>
 
         const cleanPhone = phoneNumber.replace(/\s+/g, '');
 
-        // Verify OTP Hash
-        const isValid = verifyOTPHash(cleanPhone, otp, Number(expiresAt), hash);
+        // Check if this is a test number - allow test OTP to bypass hash verification
+        const isTestNumber = isTestPhoneNumber(cleanPhone);
+        let isValid = false;
+
+        if (isTestNumber && otp === TEST_OTP) {
+            // Test number with test OTP - always allow (bypass hash check)
+            console.log('[TEST MODE] Test number detected for login, accepting test OTP without hash verification');
+            isValid = true;
+        } else {
+            // Normal verification - check hash
+            isValid = verifyOTPHash(cleanPhone, otp, Number(expiresAt), hash);
+        }
 
         if (!isValid) {
             return res.status(400).json({ error: 'Invalid or expired OTP. Please try again.' });

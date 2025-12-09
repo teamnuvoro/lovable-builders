@@ -15,6 +15,19 @@ const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 // Secret for signing OTPs (use a stable secret in production)
 const OTP_SECRET = process.env.SUPABASE_SERVICE_ROLE_KEY || 'dev-secret-key-do-not-use-in-prod';
 
+// Test/Dummy credentials for third-party testing (Razorpay, etc.)
+// Set these in environment variables for testing
+const TEST_PHONE_NUMBER = process.env.TEST_PHONE_NUMBER || '+919999999999'; // Default test number
+const TEST_OTP = process.env.TEST_OTP || '123456'; // Default test OTP
+const TEST_EMAIL = process.env.TEST_EMAIL || 'test@riya.ai'; // Default test email
+const TEST_NAME = process.env.TEST_NAME || 'Test User'; // Default test name
+
+// Check if a phone number is a test number
+function isTestPhoneNumber(phoneNumber: string): boolean {
+  const cleanPhone = phoneNumber.replace(/\s+/g, '');
+  return cleanPhone === TEST_PHONE_NUMBER || cleanPhone === TEST_PHONE_NUMBER.replace('+', '');
+}
+
 // Generate 6-digit OTP
 function generateOTP(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
@@ -113,11 +126,14 @@ router.post('/api/auth/send-otp', async (req: Request, res: Response) => {
 
         res.json({
             success: true,
-            message: twilioClient
-                ? 'OTP sent to your phone number'
-                : `OTP sent (Dev Mode): ${otp}`,
-            devMode: !twilioClient,
-            otp: !twilioClient ? otp : undefined, // Only show in dev mode
+            message: isTestNumber 
+                ? `Test OTP: ${TEST_OTP} (Test number - no SMS sent)`
+                : twilioClient
+                    ? 'OTP sent to your phone number'
+                    : `OTP sent (Dev Mode): ${otp}`,
+            devMode: !twilioClient || isTestNumber,
+            isTestNumber: isTestNumber,
+            otp: (!twilioClient || isTestNumber) ? otp : undefined, // Show OTP in dev mode or for test numbers
             hash,
             expiresAt
         });
@@ -243,15 +259,29 @@ router.post('/api/auth/login', async (req: Request, res: Response) => {
             });
         }
 
-        // Generate OTP for login
-        const otp = generateOTP();
+        // Check if this is a test phone number
+        const isTestNumber = isTestPhoneNumber(cleanPhone);
+        
+        // Generate OTP (use fixed test OTP for test numbers)
+        const otp = isTestNumber ? TEST_OTP : generateOTP();
         const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+        if (isTestNumber) {
+          console.log('[TEST MODE] Using test OTP for login with test phone number:', cleanPhone);
+          console.log('[TEST MODE] Test OTP:', TEST_OTP);
+        }
 
         // Generate Hash
         const hash = signOTP(cleanPhone, otp, expiresAt);
 
-        // Send OTP via SMS
-        const sent = await sendOTPViaSMS(cleanPhone, otp);
+        // Send OTP via SMS (skip for test numbers, just log it)
+        let sent = true;
+        if (isTestNumber) {
+          console.log(`[TEST MODE] OTP for test number ${cleanPhone}: ${TEST_OTP}`);
+          console.log('[TEST MODE] No SMS sent - this is a test number');
+        } else {
+          sent = await sendOTPViaSMS(cleanPhone, otp);
+        }
 
         if (!sent && twilioClient) {
             return res.status(500).json({
@@ -261,11 +291,14 @@ router.post('/api/auth/login', async (req: Request, res: Response) => {
 
         res.json({
             success: true,
-            message: twilioClient
-                ? 'OTP sent to your phone number'
-                : `OTP sent (Dev Mode): ${otp}`,
-            devMode: !twilioClient,
-            otp: !twilioClient ? otp : undefined,
+            message: isTestNumber 
+                ? `Test OTP: ${TEST_OTP} (Test number - no SMS sent)`
+                : twilioClient
+                    ? 'OTP sent to your phone number'
+                    : `OTP sent (Dev Mode): ${otp}`,
+            devMode: !twilioClient || isTestNumber,
+            isTestNumber: isTestNumber,
+            otp: (!twilioClient || isTestNumber) ? otp : undefined,
             userName: user.name,
             hash,
             expiresAt

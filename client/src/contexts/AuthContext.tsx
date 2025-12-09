@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       } else if (sessionUser) {
         // Fallback: Construct user from Session Metadata if DB is inaccessible (RLS or missing)
-        console.log('Falling back to session metadata for user:', userId);
+        // This is normal if user doesn't exist in DB yet or RLS is blocking - not an error
         const metadata = sessionUser.user_metadata || {};
 
         const fallbackUser: User = {

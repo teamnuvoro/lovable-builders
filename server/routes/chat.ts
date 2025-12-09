@@ -3,6 +3,66 @@ import { supabase, isSupabaseConfigured, PERSONA_CONFIGS, type PersonaType } fro
 import { RIYA_BASE_PROMPT, FREE_MESSAGE_LIMIT, PAYWALL_MESSAGE } from "../prompts";
 import Groq from "groq-sdk";
 
+// ============================================
+// Phase 2: AI & Romance Metrics Utilities
+// ============================================
+
+/**
+ * Analyze intimacy/romance level in text
+ * Returns a score from 0-5 based on keyword matching
+ */
+function analyzeIntimacy(text: string): number {
+  if (!text || typeof text !== 'string') return 0;
+  
+  const lowerText = text.toLowerCase();
+  const keywords = {
+    high: ['love', 'i love you', 'i love', 'miss you', 'miss', 'kiss', 'hug', 'cuddle', 'romantic', 'date', 'together', 'forever', 'soulmate', 'heart'],
+    medium: ['cute', 'sweet', 'beautiful', 'handsome', 'attractive', 'like you', 'care about', 'special', 'important'],
+    low: ['nice', 'good', 'thanks', 'thank you', 'appreciate']
+  };
+  
+  let score = 0;
+  
+  // High intimacy keywords (3-5 points)
+  for (const keyword of keywords.high) {
+    if (lowerText.includes(keyword)) {
+      score = Math.max(score, 3 + Math.floor(Math.random() * 3)); // 3-5 points
+      break; // Take highest match
+    }
+  }
+  
+  // Medium intimacy keywords (2-3 points)
+  if (score < 3) {
+    for (const keyword of keywords.medium) {
+      if (lowerText.includes(keyword)) {
+        score = Math.max(score, 2 + Math.floor(Math.random() * 2)); // 2-3 points
+        break;
+      }
+    }
+  }
+  
+  // Low intimacy keywords (1 point)
+  if (score === 0) {
+    for (const keyword of keywords.low) {
+      if (lowerText.includes(keyword)) {
+        score = 1;
+        break;
+      }
+    }
+  }
+  
+  return Math.min(score, 5); // Cap at 5
+}
+
+/**
+ * Calculate Conversation Balance Ratio
+ * Returns userChars / aiChars (or 0 if no AI response yet)
+ */
+function calculateBalanceRatio(userChars: number, aiChars: number): number {
+  if (!aiChars || aiChars === 0) return 0;
+  return Math.round((userChars / aiChars) * 100) / 100; // Round to 2 decimals
+}
+
 const router = Router();
 
 const DEV_USER_ID = "00000000-0000-0000-0000-000000000001";

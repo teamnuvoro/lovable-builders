@@ -39,20 +39,21 @@ export default function UserJourneyPage() {
     recentEvents: Event[];
     uniqueUserIds: string[];
   }>({
-    queryKey: ['/api/admin/analytics', days, selectedUserId, user?.id],
+    queryKey: ['/api/admin/journey', days, selectedUserId, searchQuery, eventFilter, currentPage, user?.id],
     queryFn: async () => {
       if (!user?.id) {
         throw new Error('User not authenticated');
       }
-      const url = `/api/admin/analytics?days=${days}&userId=${user.id}${selectedUserId !== 'all' ? `&filterUserId=${selectedUserId}` : ''}`;
+      // Use new paginated endpoint
+      const url = `/api/admin/journey?days=${days}&page=${currentPage}&limit=${eventsPerPage}&userId=${user.id}${selectedUserId !== 'all' ? `&filterUserId=${selectedUserId}` : ''}${searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : ''}${eventFilter !== 'all' ? `&event_type=${encodeURIComponent(eventFilter)}` : ''}`;
       const response = await fetch(url, {
         headers: { 'Content-Type': 'application/json' }
       });
       if (!response.ok) throw new Error('Failed to fetch analytics');
       const result = await response.json();
       return {
-        recentEvents: result.recentEvents || [],
-        uniqueUserIds: result.uniqueUserIds || []
+        recentEvents: result.events || [],
+        uniqueUserIds: [] // Will be fetched separately if needed
       };
     },
     retry: false,
@@ -191,7 +192,7 @@ export default function UserJourneyPage() {
           </div>
           <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
             <span>
-              Showing {filteredEvents.length} of {data?.recentEvents?.length || 0} events
+              Showing {paginatedEvents.length} of {data?.pagination?.total || filteredEvents.length} events
               {selectedUserId !== 'all' && ` for selected user`}
             </span>
             <div className="flex items-center gap-2">

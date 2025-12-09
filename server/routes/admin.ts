@@ -354,5 +354,138 @@ router.get('/api/admin/analytics', requireAuth, async (req: Request, res: Respon
   }
 });
 
+// GET /api/admin/journey - Get paginated user journey events with server-side filtering
+router.get('/api/admin/journey', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!isSupabaseConfigured) {
+      return res.status(503).json({ error: 'Database not configured' });
+    }
+
+    // Get query parameters
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const search = (req.query.search as string) || '';
+    const eventType = (req.query.event_type as string) || '';
+    const filterUserId = (req.query.filterUserId as string) || '';
+    const days = parseInt(req.query.days as string) || 7;
+
+    // Calculate date range
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    const startDateISO = startDate.toISOString();
+
+    // Build base query
+    let eventsQuery = supabase
+      .from('user_events')
+      .select('*', { count: 'exact' })
+      .gte('created_at', startDateISO)
+      .order('created_at', { ascending: false });
+
+    // Apply user filter at database level
+    if (filterUserId && filterUserId !== 'all') {
+      eventsQuery = eventsQuery.eq('user_id', filterUserId);
+    }
+
+    // Apply event type filter at database level
+    if (eventType && eventType !== 'all') {
+      eventsQuery = eventsQuery.eq('event_name', eventType);
+    }
+
+    // Apply search filter at database level (if possible)
+    // Note: Supabase text search is limited, so we'll do partial filtering
+    // For better performance, we could use full-text search if needed
+    if (search) {
+      // Search in user_id (exact match) or use ilike for event_name/event_place
+      if (search.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+        // It's a UUID, search user_id
+        eventsQuery = eventsQuery.eq('user_id', search);
+      } else {
+        // Text search in event_name or event_place
+        eventsQuery = eventsQuery.or(`event_name.ilike.%${search}%,event_place.ilike.%${search}%`);
+      }
+    }
+
+    // Get total count before pagination
+    const { count: totalCount } = await eventsQuery;
+
+    // Apply pagination
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+    eventsQuery = eventsQuery.range(from, to);
+
+    const { data: events, error: eventsError } = await eventsQuery;
+
+    if (eventsError) {
+      console.error('[Admin Journey] Error fetching events:', eventsError);
+      return res.status(500).json({ error: 'Failed to fetch events', details: eventsError.message });
+    }
+
+    // Map events to expected format
+    const mappedEvents = (events || []).map(event => ({
+      event_time: event.event_time || event.created_at || event.occurred_at || new Date().toISOString(),
+      user_id: event.user_id || 'N/A',
+      event_name: event.event_name || event.event_type || 'unknown',
+      event_place: event.event_place || event.path || event.event_data?.screen || event.event_properties?.screen || 'N/A',
+      event_data: event.event_data || event.event_properties || event.metadata || {}
+    }));
+
+    res.json({
+      events: mappedEvents,
+      pagination: {
+        page,
+        limit,
+        total: totalCount || 0,
+        totalPages: Math.ceil((totalCount || 0) / limit)
+      }
+    });
+  } catch (error: any) {
+    console.error('[Admin Journey] Error:', error);
+    res.status(500).json({ error: 'Failed to fetch journey data', details: error.message });
+  }
+});
+
+// GET /api/admin/session/:sessionId/transcript - Get conversation transcript for a session
+router.get('/api/admin/session/:sessionId/transcript', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!isSupabaseConfigured) {
+      return res.status(503).json({ error: 'Database not configured' });
+    }
+
+    const { sessionId } = req.params;
+
+    // Fetch last 10 messages (user + AI) for the session
+    const { data: messages, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (error) {
+      console.error('[Admin Transcript] Error fetching messages:', error);
+      return res.status(500).json({ error: 'Failed to fetch transcript', details: error.message });
+    }
+
+    // Reverse to show chronological order (oldest first)
+    const transcript = (messages || [])
+      .reverse()
+      .map((msg: any) => ({
+        role: msg.role,
+        text: msg.text || msg.content,
+        timestamp: msg.created_at,
+        tag: msg.tag || 'general'
+      }));
+
+    res.json({
+      sessionId,
+      transcript,
+      messageCount: transcript.length
+    });
+  } catch (error: any) {
+    console.error('[Admin Transcript] Error:', error);
+    res.status(500).json({ error: 'Failed to fetch transcript', details: error.message });
+  }
+});
+
 export default router;
 

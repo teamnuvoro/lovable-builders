@@ -641,6 +641,46 @@ export default function AdminAnalytics() {
           </div>
         </Card>
 
+        {/* Phase 4: Cohort Retention Visualization */}
+        <Card className="p-6">
+          <h2 className="text-xl font-semibold mb-4">Cohort Retention Analysis</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr className="border-b">
+                  <th className="text-left p-3 font-semibold">Weeks Since Signup</th>
+                  <th className="text-left p-3 font-semibold">Users in Cohort</th>
+                  <th className="text-left p-3 font-semibold">Active This Week</th>
+                  <th className="text-left p-3 font-semibold">Retention %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { weeks: 0, users: 0, active: 0, retention: 0 },
+                  { weeks: 1, users: 0, active: 0, retention: 0 },
+                  { weeks: 2, users: 0, active: 0, retention: 0 },
+                  { weeks: 3, users: 0, active: 0, retention: 0 },
+                  { weeks: 4, users: 0, active: 0, retention: 0 },
+                ].map((cohort, idx) => (
+                  <tr key={idx} className="border-b hover:bg-muted/30">
+                    <td className="p-3 font-medium">{cohort.weeks === 0 ? 'This Week' : `${cohort.weeks} weeks ago`}</td>
+                    <td className="p-3">{cohort.users}</td>
+                    <td className="p-3">{cohort.active}</td>
+                    <td className="p-3">
+                      <span className={`font-semibold ${cohort.retention > 20 ? 'text-green-600' : cohort.retention > 10 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {cohort.retention.toFixed(1)}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-muted-foreground mt-4 text-center">
+            Cohort analysis will be populated with real data in a future update
+          </p>
+        </Card>
+
         {/* Raw Data Summary */}
         <Card className="p-6">
           <h2 className="text-xl font-semibold mb-4">Raw Data Summary</h2>

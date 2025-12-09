@@ -69,7 +69,7 @@ function Router() {
   const [location] = useLocation();
 
   // Check if route needs top navbar layout
-  const navbarRoutes = ['/chat', '/call', '/summary', '/analytics', '/settings', '/memories', '/gallery', '/history', '/payment/callback'];
+  const navbarRoutes = ['/chat', '/call', '/summary', '/analytics', '/settings', '/memories', '/gallery', '/history', '/payment/callback', '/admin/analytics'];
   const needsNavbar = navbarRoutes.some(route => location.startsWith(route));
 
   const content = (
@@ -129,6 +129,13 @@ function Router() {
         {() => <ProtectedLayout><HistoryDetailPage /></ProtectedLayout>}
       </Route>
       <Route path="/admin/analytics">
+        {() => <ProtectedLayout><AdminAnalytics /></ProtectedLayout>}
+      </Route>
+      {/* Alias route for case-insensitive access */}
+      <Route path="/AdminAnalytics">
+        {() => <ProtectedLayout><AdminAnalytics /></ProtectedLayout>}
+      </Route>
+      <Route path="/adminanalytics">
         {() => <ProtectedLayout><AdminAnalytics /></ProtectedLayout>}
       </Route>
 

@@ -163,8 +163,18 @@ router.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
 
         const cleanPhone = phoneNumber.replace(/\s+/g, '');
 
-        // Verify OTP Hash
-        const isValid = verifyOTPHash(cleanPhone, otp, Number(expiresAt), hash);
+        // Check if this is a test number - allow test OTP to bypass hash verification
+        const isTestNumber = isTestPhoneNumber(cleanPhone);
+        let isValid = false;
+
+        if (isTestNumber && otp === TEST_OTP) {
+            // Test number with test OTP - always allow (bypass hash check)
+            console.log('[TEST MODE] Test number detected for signup, accepting test OTP without hash verification');
+            isValid = true;
+        } else {
+            // Normal verification - check hash
+            isValid = verifyOTPHash(cleanPhone, otp, Number(expiresAt), hash);
+        }
 
         if (!isValid) {
             return res.status(400).json({ error: 'Invalid or expired OTP. Please try again.' });

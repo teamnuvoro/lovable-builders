@@ -180,8 +180,9 @@ router.get('/api/admin/analytics', requireAuth, async (req: Request, res: Respon
     // Find highest traffic page
     const pageCounts: Record<string, number> = {};
     events?.forEach(event => {
-      if (event.event_place) {
-        pageCounts[event.event_place] = (pageCounts[event.event_place] || 0) + 1;
+      const place = event.event_place || event.path || event.event_data?.screen || event.event_properties?.screen;
+      if (place) {
+        pageCounts[place] = (pageCounts[place] || 0) + 1;
       }
     });
     const highestTrafficPage = Object.entries(pageCounts)
@@ -209,8 +210,10 @@ router.get('/api/admin/analytics', requireAuth, async (req: Request, res: Respon
     // Persona Popularity: Group by persona_type from persona_selected events
     const personaCounts: Record<string, number> = {};
     events?.forEach(event => {
-      if (event.event_name === 'persona_selected' || event.event_name === 'persona_selection') {
-        const personaType = event.event_data?.persona_type || event.event_data?.persona || 'unknown';
+      const name = event.event_name || event.event_type;
+      if (name === 'persona_selected' || name === 'persona_selection') {
+        const eventData = event.event_data || event.event_properties || event.metadata || {};
+        const personaType = eventData.persona_type || eventData.persona || 'unknown';
         personaCounts[personaType] = (personaCounts[personaType] || 0) + 1;
       }
     });

@@ -581,46 +581,56 @@ export default function AdminAnalytics() {
 
         {/* Section 3: The "User Journey" Table (Drill-Down Focus) */}
         <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">
-            User Journey Table
-            {selectedUserId !== 'all' && (
-              <span className="ml-2 text-sm font-normal text-muted-foreground">
-                (Filtered for selected user)
-              </span>
-            )}
-          </h2>
-          <div className="overflow-x-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">
+              User Journey Table
+              {selectedUserId !== 'all' && (
+                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                  (Filtered for selected user)
+                </span>
+              )}
+            </h2>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span>Auto-refreshing every 5 seconds</span>
+            </div>
+          </div>
+          <div className="overflow-x-auto border rounded-lg">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="bg-muted/50">
                 <tr className="border-b">
-                  <th className="text-left p-2 font-semibold">Time</th>
-                  <th className="text-left p-2 font-semibold">Event Name</th>
-                  <th className="text-left p-2 font-semibold">Screen</th>
-                  <th className="text-left p-2 font-semibold">Layman's Explanation</th>
-                  <th className="text-left p-2 font-semibold">Details (Properties)</th>
+                  <th className="text-left p-3 font-semibold sticky left-0 bg-muted/50 z-10">Time</th>
+                  <th className="text-left p-3 font-semibold">User ID</th>
+                  <th className="text-left p-3 font-semibold">Event Name</th>
+                  <th className="text-left p-3 font-semibold">Screen</th>
+                  <th className="text-left p-3 font-semibold">Layman's Explanation</th>
+                  <th className="text-left p-3 font-semibold">Details (Properties)</th>
                 </tr>
               </thead>
               <tbody>
                 {data.recentEvents && data.recentEvents.length > 0 ? (
                   data.recentEvents.map((event, index) => (
-                    <tr key={index} className="border-b hover:bg-muted/50 transition-colors">
-                      <td className="p-2 text-xs font-mono">
+                    <tr key={`${event.event_time}-${event.user_id}-${index}`} className="border-b hover:bg-muted/30 transition-colors">
+                      <td className="p-3 text-xs font-mono sticky left-0 bg-background z-10">
                         {new Date(event.event_time).toLocaleString()}
                       </td>
-                      <td className="p-2 font-medium">{event.event_name}</td>
-                      <td className="p-2">
+                      <td className="p-3 font-mono text-xs text-muted-foreground">
+                        {event.user_id !== 'N/A' ? `${event.user_id.substring(0, 8)}...` : 'N/A'}
+                      </td>
+                      <td className="p-3 font-medium">{event.event_name}</td>
+                      <td className="p-3">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getScreenColor(event.event_place, event.event_name)}`}>
                           {event.event_place || 'N/A'}
                         </span>
                       </td>
-                      <td className="p-2 text-xs max-w-md">
+                      <td className="p-3 text-xs max-w-md">
                         {getEventExplanation(event.event_name, event.event_data)}
                       </td>
-                      <td className="p-2 text-xs font-mono text-muted-foreground max-w-xs">
+                      <td className="p-3 text-xs font-mono text-muted-foreground max-w-xs">
                         {event.event_data && Object.keys(event.event_data).length > 0 ? (
                           <details className="cursor-pointer">
-                            <summary className="text-blue-600 hover:text-blue-800">View properties</summary>
-                            <pre className="mt-1 text-[10px] bg-gray-50 p-2 rounded overflow-auto">
+                            <summary className="text-blue-600 hover:text-blue-800 font-sans">View properties</summary>
+                            <pre className="mt-1 text-[10px] bg-gray-50 p-2 rounded overflow-auto max-h-40 border">
                               {JSON.stringify(event.event_data, null, 2)}
                             </pre>
                           </details>
@@ -632,14 +642,22 @@ export default function AdminAnalytics() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-muted-foreground">
-                      No events found for the selected time period{selectedUserId !== 'all' ? ' and user' : ''}.
+                    <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                      <div className="flex flex-col items-center gap-2">
+                        <p>No events found for the selected time period{selectedUserId !== 'all' ? ' and user' : ''}.</p>
+                        <p className="text-xs">Events will appear here as they are tracked in real-time.</p>
+                      </div>
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+          {data.recentEvents && data.recentEvents.length > 0 && (
+            <div className="mt-4 text-xs text-muted-foreground text-center">
+              Showing {data.recentEvents.length} most recent events
+            </div>
+          )}
         </Card>
 
         {/* Raw Data Summary */}

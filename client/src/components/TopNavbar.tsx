@@ -9,6 +9,7 @@ import {
   Crown,
   Image as ImageIcon,
   BarChart3,
+  MessageCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
@@ -27,6 +28,7 @@ export function TopNavbar() {
   const [location, setLocation] = useLocation();
   const { logout, user } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const isChatPage = location === '/chat';
 
   // Fetch user usage for chat page
@@ -282,6 +284,13 @@ export function TopNavbar() {
           }
         }
       `}</style>
+
+      {/* Feedback Modal */}
+      <FeedbackModal
+        isOpen={showFeedbackModal}
+        onClose={() => setShowFeedbackModal(false)}
+        triggerContext="manual"
+      />
     </nav>
   );
 }

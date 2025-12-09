@@ -3,15 +3,14 @@ import { supabase, isSupabaseConfigured } from '../supabase';
 
 const router = Router();
 
-// Middleware to check if user is admin
-async function requireAdmin(req: Request, res: Response, next: Function) {
+// Middleware to check if user is authenticated (password protection is handled on frontend)
+async function requireAuth(req: Request, res: Response, next: Function) {
   try {
     if (!isSupabaseConfigured) {
       return res.status(503).json({ error: 'Database not configured' });
     }
 
-    // Get user ID from request body, query, or headers (adjust based on your auth setup)
-    // Since this app uses Supabase auth, we'll get userId from the request
+    // Get user ID from request body, query, or headers
     const userId = req.body?.userId || req.query?.userId || (req as any).session?.userId || (req as any).user?.id;
     
     if (!userId) {
@@ -25,10 +24,10 @@ async function requireAdmin(req: Request, res: Response, next: Function) {
       return res.status(401).json({ error: 'Unauthorized - No user session' });
     }
 
-    // Check if user is admin
+    // Verify user exists (but don't check admin status - password protection is on frontend)
     const { data: user, error } = await supabase
       .from('users')
-      .select('is_admin')
+      .select('id')
       .eq('id', userId)
       .single();
 
@@ -37,12 +36,7 @@ async function requireAdmin(req: Request, res: Response, next: Function) {
       return res.status(403).json({ error: 'Forbidden - User not found' });
     }
 
-    if (!user.is_admin) {
-      console.warn(`[Admin] Non-admin user ${userId} attempted to access admin endpoint`);
-      return res.status(403).json({ error: 'Forbidden - Admin access required' });
-    }
-
-    // User is admin, proceed
+    // User is authenticated, proceed (password check is handled on frontend)
     next();
   } catch (error: any) {
     console.error('[Admin] Auth check error:', error);
@@ -50,8 +44,8 @@ async function requireAdmin(req: Request, res: Response, next: Function) {
   }
 }
 
-// GET /api/admin/analytics - Get analytics data
-router.get('/api/admin/analytics', requireAdmin, async (req: Request, res: Response) => {
+// GET /api/admin/analytics - Get analytics data (password protected on frontend)
+router.get('/api/admin/analytics', requireAuth, async (req: Request, res: Response) => {
   try {
     if (!isSupabaseConfigured) {
       return res.status(503).json({ error: 'Database not configured' });

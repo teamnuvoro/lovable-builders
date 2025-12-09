@@ -134,8 +134,12 @@ export default function AdminAnalytics() {
         }
       });
       if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error('Access denied. Please enter the correct password.');
+        if (response.status === 401 || response.status === 403) {
+          // If auth fails, clear session and show password dialog
+          sessionStorage.removeItem(AUTH_STORAGE_KEY);
+          setIsAuthenticated(false);
+          setShowPasswordDialog(true);
+          throw new Error('Session expired. Please enter the password again.');
         }
         throw new Error('Failed to fetch analytics');
       }

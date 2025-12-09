@@ -2,9 +2,19 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, BarChart3, TrendingUp, Users, DollarSign } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Loader2, BarChart3, TrendingUp, Users, DollarSign, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 
 // Event translation map
 const EVENT_TRANSLATIONS: Record<string, string> = {
@@ -79,14 +89,14 @@ export default function AdminAnalytics() {
       });
       if (!response.ok) {
         if (response.status === 403) {
-          throw new Error('Access denied. Admin privileges required.');
+          throw new Error('Access denied. Please enter the correct password.');
         }
         throw new Error('Failed to fetch analytics');
       }
       return response.json();
     },
     retry: false,
-    enabled: !!user?.id, // Only fetch if user is logged in
+    enabled: !!user?.id && isAuthenticated, // Only fetch if user is logged in AND password authenticated
   });
 
   const getEventExplanation = (eventName: string): string => {

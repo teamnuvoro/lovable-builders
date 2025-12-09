@@ -63,18 +63,64 @@ interface AnalyticsData {
   };
 }
 
+// Admin password - stored as constant
+const ADMIN_PASSWORD = 'nuvoro@101';
+const AUTH_STORAGE_KEY = 'admin_analytics_auth';
+
 export default function AdminAnalytics() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
+  const { toast } = useToast();
   const [days, setDays] = useState(7);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
-  // Check if user is admin (you can add this to your user object)
+  // Check if user is already authenticated
   useEffect(() => {
-    // For now, we'll check on the backend, but you might want to add client-side check
-    // if (user && !user.is_admin) {
-    //   setLocation('/chat');
-    // }
-  }, [user, setLocation]);
+    const authStatus = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    if (authStatus === 'authenticated') {
+      setIsAuthenticated(true);
+    } else {
+      setShowPasswordDialog(true);
+    }
+  }, []);
+
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+
+    if (password === ADMIN_PASSWORD) {
+      setIsAuthenticated(true);
+      setShowPasswordDialog(false);
+      sessionStorage.setItem(AUTH_STORAGE_KEY, 'authenticated');
+      toast({
+        title: "Access Granted",
+        description: "Welcome to Admin Analytics",
+      });
+      setPassword('');
+    } else {
+      setPasswordError('Incorrect password. Please try again.');
+      setPassword('');
+      toast({
+        title: "Access Denied",
+        description: "Incorrect password",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    setIsAuthenticated(false);
+    setShowPasswordDialog(true);
+    setPassword('');
+    toast({
+      title: "Logged Out",
+      description: "You have been logged out of Admin Analytics",
+    });
+  };
 
   const { data, isLoading, error, refetch } = useQuery<AnalyticsData>({
     queryKey: ['/api/admin/analytics', days, user?.id],
@@ -102,6 +148,66 @@ export default function AdminAnalytics() {
   const getEventExplanation = (eventName: string): string => {
     return EVENT_TRANSLATIONS[eventName] || `Technical event: ${eventName}`;
   };
+
+  // Password Dialog
+  if (showPasswordDialog && !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Dialog open={showPasswordDialog} onOpenChange={(open) => {
+          if (!open && !isAuthenticated) {
+            // Don't allow closing without authentication - redirect to chat
+            setLocation('/chat');
+          }
+        }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 bg-blue-100 rounded-full">
+                  <Lock className="w-6 h-6 text-blue-600" />
+                </div>
+                <DialogTitle>Admin Access Required</DialogTitle>
+              </div>
+              <DialogDescription>
+                Please enter the admin password to access the analytics dashboard.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handlePasswordSubmit} className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPasswordError('');
+                  }}
+                  placeholder="Enter admin password"
+                  className={passwordError ? 'border-red-500' : ''}
+                  autoFocus
+                />
+                {passwordError && (
+                  <p className="text-sm text-red-500">{passwordError}</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button type="submit" className="flex-1">
+                  Access Dashboard
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setLocation('/chat')}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -137,7 +243,12 @@ export default function AdminAnalytics() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-3xl font-bold">Analytics Dashboard</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold">Analytics Dashboard</h1>
+              <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-semibold">
+                Protected
+              </span>
+            </div>
             <p className="text-muted-foreground mt-1">
               Data from {new Date(data.metrics.dateRange.start).toLocaleDateString()} to{' '}
               {new Date(data.metrics.dateRange.end).toLocaleDateString()} ({data.metrics.dateRange.days} days)
@@ -160,6 +271,10 @@ export default function AdminAnalytics() {
             </Button>
             <Button variant="outline" size="sm" onClick={() => refetch()}>
               Refresh
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleLogout}>
+              <Lock className="w-4 h-4 mr-2" />
+              Logout
             </Button>
           </div>
         </div>

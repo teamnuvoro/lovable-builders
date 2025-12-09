@@ -59,6 +59,8 @@ export default function ChatPage() {
   }, []);
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([]);
   const [failedMessage, setFailedMessage] = useState<string>("");
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [paywallTriggered, setPaywallTriggered] = useState(false);
   const { toast } = useToast();
   const { user, refetchUser } = useAuth();
   const isMobile = useIsMobile();

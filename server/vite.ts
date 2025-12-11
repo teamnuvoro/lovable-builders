@@ -29,6 +29,7 @@ export async function setupVite(app: Express, server: Server) {
   const vite = await createViteServer({
     ...viteConfig,
     configFile: false,
+    root: path.resolve(import.meta.dirname, "..", "client"),
     customLogger: {
       ...viteLogger,
       error: (msg, options) => {
@@ -47,6 +48,16 @@ export async function setupVite(app: Express, server: Server) {
   app.use("*", async (req, res, next) => {
     const url = req.originalUrl;
 
+    // Skip HTML parsing for non-HTML files and special paths
+    if (
+      url.match(/\.(ico|png|jpg|jpeg|gif|svg|woff|woff2|ttf|eot|json|xml|txt|pdf)$/i) ||
+      url.startsWith('/.well-known/') ||
+      url.startsWith('/api/') ||
+      url.startsWith('/_vite/')
+    ) {
+      return next();
+    }
+
     try {
       const clientTemplate = path.resolve(
         import.meta.dirname,
@@ -56,21 +67,22 @@ export async function setupVite(app: Express, server: Server) {
 
       // always reload the index.html file from disk incase it changes
       let template = await fs.promises.readFile(clientTemplate, "utf-8");
-      console.log('[Debug] Loaded index.html template. Includes client path?', template.includes('src="/client/src/main.tsx"'));
-      console.log('[Debug] Template content snippet:', template.substring(0, 200));
-
-      // Try replacing the correct path first
+      
+      // Since Vite root is set to client directory, the path should be /src/main.tsx
+      // Replace any old paths to the correct one and add cache buster
       if (template.includes('src="/client/src/main.tsx"')) {
         template = template.replace(
           `src="/client/src/main.tsx"`,
-          `src="/client/src/main.tsx?v=${nanoid()}"`,
+          `src="/src/main.tsx?v=${nanoid()}`,
         );
-      } else {
-        // Fallback for old path
-        template = template.replace(
-          `src="/src/main.tsx"`,
-          `src="/client/src/main.tsx?v=${nanoid()}"`,
-        );
+      } else if (template.includes('src="/src/main.tsx"')) {
+        // Already correct, just add cache buster if not present
+        if (!template.includes('src="/src/main.tsx?v=')) {
+          template = template.replace(
+            `src="/src/main.tsx"`,
+            `src="/src/main.tsx?v=${nanoid()}`,
+          );
+        }
       }
       const page = await vite.transformIndexHtml(url, template);
       res.status(200).set({ "Content-Type": "text/html" }).end(page);

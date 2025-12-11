@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { supabase, PERSONA_CONFIGS, isSupabaseConfigured, type PersonaType, type User, type Session, type Message, type UsageStats } from '../supabase';
+import { checkUserHasPayment, checkUserHasActiveSubscription } from '../utils/checkUserHasPayment';
 
 const router = Router();
 
@@ -139,7 +140,8 @@ router.patch('/api/user/persona', async (req: Request, res: Response) => {
 // Get user usage stats
 router.get('/api/user/usage', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).session?.userId || DEV_USER_ID;
+    // Get userId from query params, session, or fallback to dev
+    const userId = (req.query?.userId as string) || (req as any).session?.userId || DEV_USER_ID;
 
     // Try to get usage stats - if table doesn't exist, use defaults
     let stats = { total_messages: 0, total_call_seconds: 0 };
@@ -194,8 +196,8 @@ router.get('/api/user/usage', async (req: Request, res: Response) => {
       console.log('[/api/user/usage] Using default stats:', e);
     }
 
-    // Calculate message limit (5 for free, unlimited for premium)
-    const messageLimit = isPremium ? 999999 : 5;
+    // Calculate message limit (20 for free users, unlimited for premium)
+    const messageLimit = isPremium ? 999999 : 20;
     const messageLimitReached = !isPremium && stats.total_messages >= messageLimit;
 
     res.json({
@@ -222,7 +224,8 @@ router.get('/api/user/usage', async (req: Request, res: Response) => {
 // Increment message count
 router.post('/api/user/usage', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).session?.userId || DEV_USER_ID;
+    // Get userId from request body (frontend sends it), session, or fallback to dev
+    const userId = req.body?.userId || (req as any).session?.userId || DEV_USER_ID;
     const { incrementMessages, incrementCallSeconds } = req.body;
 
     let currentMessages = 0;
@@ -259,32 +262,55 @@ router.post('/api/user/usage', async (req: Request, res: Response) => {
         console.error('[POST /api/user/usage] Supabase error:', error);
       }
 
-      // Also fetch user premium status
-      const { data: userData } = await supabase
-        .from('users')
-        .select('premium_user, subscription_plan, subscription_expiry')
-        .eq('id', userId)
-        .single();
-
-      if (userData) {
-        isPremium = userData.premium_user || false;
-        subscriptionPlan = userData.subscription_plan;
+      // NEW LOGIC: Check payments table for successful payments
+      // This is the source of truth - users with successful payments have premium access
+      try {
+        const paymentCheck = await checkUserHasPayment(supabase, userId);
+        const subscriptionCheck = await checkUserHasActiveSubscription(supabase, userId);
         
-        // Check if subscription expired
-        if (isPremium && userData.subscription_expiry) {
-          const expiry = new Date(userData.subscription_expiry);
-          const now = new Date();
-          if (expiry < now) {
-            isPremium = false;
-          }
+        // User has premium access if they have successful payment OR active subscription
+        isPremium = paymentCheck.hasPayment || subscriptionCheck;
+        
+        if (paymentCheck.hasPayment) {
+          subscriptionPlan = paymentCheck.planType || 'daily';
+          console.log(`[User Usage] User ${userId} has premium via payment: ${subscriptionPlan}`);
+        } else if (subscriptionCheck) {
+          // Get subscription plan from subscriptions table
+          const { data: subData } = await supabase
+            .from('subscriptions')
+            .select('plan_type')
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .limit(1)
+            .single();
+          
+          subscriptionPlan = subData?.plan_type || 'daily';
+          console.log(`[User Usage] User ${userId} has premium via subscription: ${subscriptionPlan}`);
+        } else {
+          isPremium = false;
+          subscriptionPlan = null;
+          console.log(`[User Usage] User ${userId} is FREE - no successful payments`);
+        }
+      } catch (paymentCheckError) {
+        console.warn('[User Usage] Error checking payments, falling back to user table:', paymentCheckError);
+        // Fallback: check user table (legacy support)
+        const { data: userData } = await supabase
+          .from('users')
+          .select('premium_user, subscription_plan')
+          .eq('id', userId)
+          .single();
+        
+        if (userData) {
+          isPremium = userData.premium_user || false;
+          subscriptionPlan = userData.subscription_plan;
         }
       }
     } catch (e) {
       console.log('[POST /api/user/usage] Using local counters:', e);
     }
 
-    // Calculate message limit
-    const messageLimit = isPremium ? 999999 : 5;
+    // Calculate message limit (20 for free users, unlimited for premium)
+    const messageLimit = isPremium ? 999999 : 20;
     const finalMessageCount = currentMessages + (incrementMessages || 0);
     const messageLimitReached = !isPremium && finalMessageCount >= messageLimit;
 

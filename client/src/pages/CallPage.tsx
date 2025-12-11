@@ -56,12 +56,12 @@ export default function CallPage() {
     messageLimitReached: boolean;
     callLimitReached: boolean;
   }>({
-    queryKey: ["/api/user/usage"],
+    queryKey: ["/api/user/usage", "call", user?.id],
     queryFn: async () => {
-      const response = await apiRequest("POST", "/api/user/usage", {});
+      const response = await apiRequest("POST", "/api/user/usage", { userId: user?.id });
       return response.json();
     },
-    enabled: !!user,
+    enabled: !!user?.id, // Only fetch when user is logged in
   });
 
   const startCallMutation = useMutation({

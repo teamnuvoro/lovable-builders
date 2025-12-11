@@ -7,7 +7,7 @@ import { PaywallSheet } from "@/components/paywall/PaywallSheet";
 import { AmplitudePasswordModal } from "@/components/AmplitudePasswordModal";
 import { ExitIntentModal } from "@/components/ExitIntentModal";
 import { useExitIntent } from "@/hooks/useExitIntent";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -70,12 +70,7 @@ export default function ChatPage() {
   const { data: session, isLoading: isSessionLoading } = useQuery<Session>({
     queryKey: ["session", user?.id],
     queryFn: async () => {
-      const res = await fetch("/api/session", {
-        method: "POST",
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user?.id })
-      });
-      if (!res.ok) throw new Error("Failed to get session");
+      const res = await apiRequest("POST", "/api/session", { userId: user?.id });
       return res.json();
     },
     enabled: !!user?.id // Only fetch session when user is available
@@ -85,8 +80,7 @@ export default function ChatPage() {
     queryKey: ["messages", session?.id],
     enabled: !!session?.id,
     queryFn: async () => {
-      const res = await fetch(`/api/messages?sessionId=${session?.id}`);
-      if (!res.ok) return [];
+      const res = await apiRequest("GET", `/api/messages?sessionId=${session?.id}`);
       const rawMessages = await res.json();
       // Map backend format to frontend Message interface
       return rawMessages.map((msg: any) => ({
@@ -116,18 +110,25 @@ export default function ChatPage() {
         messages.map(m => ((m as any).content || m.text || '').trim().toLowerCase())
       );
 
-      setOptimisticMessages(prev =>
-        prev.filter(optMsg => {
+      setOptimisticMessages(prev => {
+        const filtered = prev.filter(optMsg => {
           // If the message is very recent (< 5 seconds), keep it to avoid flickering
           const isRecent = new Date().getTime() - optMsg.createdAt.getTime() < 5000;
           if (isRecent) return true;
 
           // Otherwise, remove it if it exists in the server list
           return !serverMessageContents.has(optMsg.content.trim().toLowerCase());
-        })
-      );
+        });
+        
+        // Only update if something actually changed
+        if (filtered.length === prev.length) {
+          return prev; // Return same reference to prevent re-render
+        }
+        return filtered;
+      });
     }
-  }, [messages, optimisticMessages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]); // Only depend on messages, not optimisticMessages
 
   interface UserUsage {
     messageCount: number;
@@ -142,18 +143,11 @@ export default function ChatPage() {
   const isFromPayment = new URLSearchParams(window.location.search).get('paymentSuccess') === 'true';
 
   const { data: userUsage, refetch: refetchUsage } = useQuery<UserUsage>({
-    queryKey: ["/api/user/usage"],
+    queryKey: ["/api/user/usage", user?.id],
     queryFn: async () => {
       try {
         // Use POST endpoint which returns premium status
-        const res = await fetch("/api/user/usage", {
-          method: "POST",
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-        if (!res.ok) {
-          return { messageCount: 0, callDuration: 0, premiumUser: false, messageLimitReached: false, callLimitReached: false };
-        }
+        const res = await apiRequest("POST", "/api/user/usage", { userId: user?.id });
         const data = await res.json();
         console.log('🔄 User usage fetched:', data);
         return data;
@@ -162,9 +156,17 @@ export default function ChatPage() {
         return { messageCount: 0, callDuration: 0, premiumUser: false, messageLimitReached: false, callLimitReached: false };
       }
     },
-    staleTime: 0, // Always fetch fresh data
-    refetchOnMount: true, // Always refetch on mount
-    refetchInterval: 5000, // Poll every 5 seconds to catch premium updates
+    enabled: !!user?.id, // Only fetch when user is available
+    staleTime: 30000, // Cache for 30 seconds
+    refetchOnMount: true,
+    // Only poll if user is NOT premium (to catch upgrade after payment)
+    // Use function to check current data state
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      const isPremium = data?.premiumUser || user?.premium_user || false;
+      // Stop polling if premium, otherwise poll every 10 seconds
+      return isPremium ? false : 10000;
+    },
   });
 
   // Force refetch user and usage when coming from payment
@@ -180,21 +182,12 @@ export default function ChatPage() {
         window.history.replaceState({}, '', '/chat');
       }, 2000);
     }
-  }, [isFromPayment, refetchUsage, refetchUser]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFromPayment]); // Only depend on isFromPayment to prevent infinite loops
 
   // Poll for premium status updates (in case payment was processed)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Only poll if user is not premium yet
-      if (!user?.premium_user && !userUsage?.premiumUser) {
-        console.log('🔄 Polling for premium status update...');
-        refetchUser();
-        refetchUsage();
-      }
-    }, 10000); // Poll every 10 seconds
-
-    return () => clearInterval(interval);
-  }, [user?.premium_user, userUsage?.premiumUser, refetchUser, refetchUsage]);
+  // Note: This is now handled by refetchInterval in the useQuery above
+  // Keeping this empty to avoid conflicts
 
   const quickReplies = [
     "Mera current relationship confusing hai",
@@ -239,8 +232,9 @@ export default function ChatPage() {
   // If backend is failing (0), we trust local. If backend has data, we trust it.
   const currentCount = Math.max(localCount, backendCount, messages.length);
 
-  // Check premium status - prioritize userUsage as it's more up-to-date
-  const isPremium = userUsage?.premiumUser || user?.premium_user || false;
+  // Check premium status - prioritize user object (from auth) as it's the source of truth
+  // Only use userUsage if user object is not available
+  const isPremium = user?.premium_user === true ? true : (userUsage?.premiumUser === true);
   
   // Debug logging
   useEffect(() => {
@@ -265,7 +259,9 @@ export default function ChatPage() {
 
   // STRICT LIMIT CHECK - Only block if NOT premium AND limit reached
   // For premium users, always allow (unlimited)
-  const isLimitReached = !isPremium && currentCount >= 5; // Changed from 20 to 5 to match backend
+  // Free users get 20 messages
+  const FREE_MESSAGE_LIMIT = 20;
+  const isLimitReached = !isPremium && currentCount >= FREE_MESSAGE_LIMIT;
   
   // Debug limit check
   useEffect(() => {
@@ -324,7 +320,9 @@ export default function ChatPage() {
       setStreamingMessage("");
 
       try {
-        const response = await fetch("/api/chat", {
+        // Chat endpoint uses streaming, so we need to use fetch directly with API_BASE
+        const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const response = await fetch(`${API_BASE}/api/chat`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -341,8 +339,20 @@ export default function ChatPage() {
         }
 
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Failed to send message");
+          // Try to parse error, but handle streaming responses
+          let errorMessage = "Failed to send message";
+          try {
+            const errorText = await response.text();
+            try {
+              const errorData = JSON.parse(errorText);
+              errorMessage = errorData.error || errorMessage;
+            } catch {
+              errorMessage = errorText || errorMessage;
+            }
+          } catch {
+            errorMessage = `Server error: ${response.status} ${response.statusText}`;
+          }
+          throw new Error(errorMessage);
         }
 
         const reader = response.body?.getReader();

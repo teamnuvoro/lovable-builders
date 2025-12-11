@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { supabase, isSupabaseConfigured, PERSONA_CONFIGS, type PersonaType } from "../supabase";
 import { RIYA_BASE_PROMPT, FREE_MESSAGE_LIMIT, PAYWALL_MESSAGE } from "../prompts";
 import Groq from "groq-sdk";
+import { checkMessageQuota, logUserMessage } from "../utils/messageQuota";
 
 // ============================================
 // Phase 2: AI & Romance Metrics Utilities
@@ -152,24 +153,34 @@ async function getUserMessageCount(userId: string): Promise<number> {
   if (!isSupabaseConfigured) return 0;
 
   try {
+    // First check if user is premium (premium users have unlimited)
+    const { data: user } = await supabase
+      .from('users')
+      .select('premium_user, subscription_expiry')
+      .eq('id', userId)
+      .single();
+
+    if (user?.premium_user) {
+      // Check if subscription expired
+      if (user.subscription_expiry) {
+        const expiry = new Date(user.subscription_expiry);
+        if (expiry < new Date()) {
+          // Expired - return 0 so they get locked (will be downgraded)
+          return 0;
+        }
+      }
+      // Premium and valid - return high number (unlimited)
+      return 999999;
+    }
+
+    // Free user: get total message count (20 message limit)
     const { data: usage } = await supabase
       .from('usage_stats')
-      .select('daily_messages_count, last_daily_reset, total_messages')
+      .select('total_messages')
       .eq('user_id', userId)
       .single();
 
-    if (!usage) return 0;
-
-    // Check for daily reset (logic: if last reset was previous day, count is 0)
-    const lastReset = usage.last_daily_reset ? new Date(usage.last_daily_reset) : new Date(0);
-    const now = new Date();
-
-    // Reset if it's a different day (simple midnight reset)
-    if (lastReset.toDateString() !== now.toDateString()) {
-      return 0;
-    }
-
-    return usage.daily_messages_count || 0;
+    return usage?.total_messages || 0;
   } catch {
     return 0;
   }
@@ -367,35 +378,18 @@ router.post("/api/chat", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Message cannot be empty" });
     }
 
-    // --- PAYWALL CHECK START ---
-    let messageCount = 0;
-    try {
-      // Moved to TOP to prevent 500 errors from blocking Paywall
-      messageCount = await getUserMessageCount(userId);
-      let isPremium = false;
+    // --- PAYWALL CHECK START (Flow 1: Check Message Quota) ---
+    let quotaCheck: any = null;
+    if (isSupabaseConfigured) {
+      quotaCheck = await checkMessageQuota(supabase, userId);
+      
+      console.log(`[Message Quota] User: ${userId}, Allowed: ${quotaCheck.allowed}, Tier: ${quotaCheck.subscriptionTier}, Count: ${quotaCheck.messageCount}/${quotaCheck.limit}`);
 
-      try {
-        // Re-fetch user to get latest premium status (avoid caching issues)
-        const { data: latestUser } = await supabase.from('users').select('premium_user, subscription_expiry').eq('id', userId).single();
-        if (latestUser) {
-          // Logic: Database flag OR Expiry in future
-          const hasValidExpiry = latestUser.subscription_expiry && new Date(latestUser.subscription_expiry) > new Date();
-          isPremium = latestUser.premium_user || hasValidExpiry;
-        }
-      } catch (userErr) {
-        console.warn("[Paywall] Failed to refetch user status:", userErr);
-        // Fallback to the 'user' object from auth middleware if available, or default false
-        isPremium = user?.premium_user || false;
-      }
-
-      console.log(`[Paywall Check] User: ${userId}, Count: ${messageCount}, Premium: ${isPremium}`);
-
-      if (!isPremium && messageCount >= FREE_MESSAGE_LIMIT) {
-        console.log(`[Paywall] BLOCKED User ${userId}. Count: ${messageCount}`);
+      if (!quotaCheck.allowed) {
+        console.log(`[Paywall] BLOCKED User ${userId}. Reason: ${quotaCheck.reason}`);
         
-        // Phase 3: Track paywall_context event
+        // Track paywall_context event
         if (isSupabaseConfigured) {
-          // Get user's persona
           const { data: userData } = await supabase
             .from('users')
             .select('persona')
@@ -404,14 +398,14 @@ router.post("/api/chat", async (req: Request, res: Response) => {
           
           const personaType = userData?.persona || 'sweet_supportive';
           
-          // Track paywall_context event
           await supabase.from('user_events').insert({
             user_id: userId,
             event_name: 'paywall_context',
             event_type: 'track',
             event_properties: {
-              triggering_message_text: content.substring(0, 200), // First 200 chars
-              session_msg_count: messageCount,
+              triggering_message_text: content.substring(0, 200),
+              message_count: quotaCheck.messageCount,
+              limit: quotaCheck.limit,
               persona_type: personaType,
               message_length: content.length
             },
@@ -419,26 +413,32 @@ router.post("/api/chat", async (req: Request, res: Response) => {
             created_at: new Date().toISOString()
           }).catch(err => {
             console.error('[Analytics] Error tracking paywall_context:', err);
-            // Don't fail the request for analytics errors
           });
         }
         
         return res.status(402).json({
           status: 402,
           code: "QUOTA_EXHAUSTED",
-          message: "Your daily 20 free chat messages have been used.",
+          message: quotaCheck.reason || "Message limit reached. Upgrade to continue chatting.",
+          messageCount: quotaCheck.messageCount,
+          limit: quotaCheck.limit,
           offers: [
-            { plan: "daily", price: 19, duration: "24 hours" },
-            { plan: "weekly", price: 49, duration: "7 days" }
+            { plan: "daily", price: 99, duration: "24 hours" },
+            { plan: "weekly", price: 499, duration: "7 days" }
           ]
         });
       }
-    } catch (paywallError) {
-      console.error("[Paywall Logic Error]", paywallError);
     }
     // --- PAYWALL CHECK END ---
 
-    console.log(`[Chat] User message: "${content.substring(0, 50)}..." (${messageCount + 1}/${FREE_MESSAGE_LIMIT})`);
+    // Log user message to message_logs (for quota tracking)
+    if (isSupabaseConfigured) {
+      await logUserMessage(supabase, userId, content);
+    }
+
+    const messageCount = quotaCheck?.messageCount || 0;
+    const limit = quotaCheck?.limit || FREE_MESSAGE_LIMIT;
+    console.log(`[Chat] User message: "${content.substring(0, 50)}..." (${messageCount + 1}/${limit})`);
 
     // Get or create session
     let finalSessionId = sessionId;

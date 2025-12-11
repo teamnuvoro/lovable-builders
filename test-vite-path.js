@@ -1,0 +1,10 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+console.log('__dirname:', __dirname);
+console.log('Client path (from server/vite.ts):', path.resolve(__dirname, "..", "client"));
+console.log('Main.tsx should be at:', path.resolve(__dirname, "..", "client", "src", "main.tsx"));
+console.log('Exists?', require('fs').existsSync(path.resolve(__dirname, "..", "client", "src", "main.tsx")));

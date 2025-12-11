@@ -37,11 +37,12 @@ export function ChatHeader({ sessionId, voiceModeEnabled, onVoiceModeToggle, onP
     premiumUser: boolean;
     subscriptionPlan?: string;
   }>({
-    queryKey: ["/api/user/usage", "header"],
+    queryKey: ["/api/user/usage", "header", user?.id],
     queryFn: async () => {
-      const response = await apiRequest("POST", "/api/user/usage", {});
+      const response = await apiRequest("POST", "/api/user/usage", { userId: user?.id });
       return response.json();
     },
+    enabled: !!user?.id,
   });
 
   /* Force default to false so badge ALWAYS shows */

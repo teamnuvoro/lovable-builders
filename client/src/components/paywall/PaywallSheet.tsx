@@ -7,6 +7,7 @@ import { Check, Loader2, ShieldCheck } from "lucide-react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { analytics } from "@/lib/analytics";
 import { trackPlanSelected } from "@/utils/amplitudeTracking";
 
@@ -40,9 +41,14 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
     staleTime: Infinity,
   });
 
+  const { user } = useAuth();
+  
   const createOrderMutation = useMutation({
     mutationFn: async (planType: 'daily' | 'weekly') => {
-      const response = await apiRequest('POST', '/api/payment/create-order', { planType });
+      const response = await apiRequest('POST', '/api/payment/create-order', { 
+        planType,
+        userId: user?.id 
+      });
       return response.json();
     },
   });
@@ -52,27 +58,75 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
   const cashfreeMode = paymentConfig?.cashfreeMode || "production";
 
   const loadCashfreeSdk = (mode: "sandbox" | "production") => {
-    return new Promise((resolve) => {
-      const scriptId = 'cashfree-sdk';
-      const existingScript = document.getElementById(scriptId);
-
-      const src = "https://sdk.cashfree.com/js/v3/cashfree.js";
-
-      if (existingScript && (existingScript as HTMLScriptElement).src === src) {
+    return new Promise((resolve, reject) => {
+      // Check if SDK is already loaded and ready
+      if (window.Cashfree && typeof window.Cashfree === 'function') {
         resolve(true);
         return;
       }
 
+      const scriptId = 'cashfree-sdk';
+      const existingScript = document.getElementById(scriptId);
+      const src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+
+      // If script exists and is the same, wait for it to load
+      if (existingScript && (existingScript as HTMLScriptElement).src === src) {
+        // Wait for Cashfree to be available
+        const checkInterval = setInterval(() => {
+          if (window.Cashfree && typeof window.Cashfree === 'function') {
+            clearInterval(checkInterval);
+            resolve(true);
+          }
+        }, 100);
+
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          if (window.Cashfree && typeof window.Cashfree === 'function') {
+            resolve(true);
+          } else {
+            reject(new Error('Cashfree SDK failed to initialize'));
+          }
+        }, 10000);
+        return;
+      }
+
+      // Remove existing script if different
       if (existingScript) {
         existingScript.remove();
       }
 
+      // Create and load new script
       const script = document.createElement("script");
       script.id = scriptId;
       script.src = src;
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
+      script.async = true;
+      
+      script.onload = () => {
+        // Wait for Cashfree to be available after script loads
+        const checkInterval = setInterval(() => {
+          if (window.Cashfree && typeof window.Cashfree === 'function') {
+            clearInterval(checkInterval);
+            resolve(true);
+          }
+        }, 100);
+
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          if (window.Cashfree && typeof window.Cashfree === 'function') {
+            resolve(true);
+          } else {
+            reject(new Error('Cashfree SDK failed to initialize'));
+          }
+        }, 10000);
+      };
+      
+      script.onerror = () => {
+        reject(new Error('Failed to load Cashfree SDK script'));
+      };
+      
+      document.head.appendChild(script);
     });
   };
 
@@ -81,7 +135,18 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
       setIsProcessing(true);
 
       // Load correct SDK first
-      await loadCashfreeSdk(cashfreeMode);
+      try {
+        await loadCashfreeSdk(cashfreeMode);
+      } catch (sdkError) {
+        console.error('Failed to load Cashfree SDK:', sdkError);
+        toast({
+          title: "Payment Error",
+          description: "Failed to load payment system. Please refresh the page and try again.",
+          variant: "destructive",
+        });
+        setIsProcessing(false);
+        return;
+      }
 
       analytics.track("checkout_started", { plan: planType, amount: planAmounts[planType] });
       trackPlanSelected(planType, planAmounts[planType], planType === 'daily' ? 1 : 7);
@@ -98,6 +163,19 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
         alert("⚠️ BACKEND FAILED: " + orderData.details);
         setIsProcessing(false);
         return; // Stop. Do not open the black screen.
+      }
+
+      // 🎭 MOCK MODE: Skip Cashfree checkout, redirect directly to callback
+      if (orderData.mock) {
+        console.log('🎭 [MOCK MODE] Skipping Cashfree checkout, redirecting to callback');
+        toast({
+          title: "Payment Successful!",
+          description: "Mock payment completed. Upgrading your account...",
+        });
+        // Redirect to callback page which will verify and upgrade
+        window.location.href = `/payment/callback?orderId=${orderData.order_id}`;
+        setIsProcessing(false);
+        return;
       }
 
       // 3. Verify Session ID exists
@@ -124,9 +202,13 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
       }
 
       // 4. Open Checkout
+      // Use ngrok URL if available (for HTTPS whitelisting), otherwise use current origin
+      const returnBaseUrl = import.meta.env.VITE_NGROK_URL || window.location.origin;
+      console.log('🌐 [Frontend] VITE_NGROK_URL from env:', import.meta.env.VITE_NGROK_URL || 'NOT SET');
+      console.log('🌐 [Frontend] Using returnUrl base:', returnBaseUrl);
       const checkoutOptions = {
         paymentSessionId: orderData.payment_session_id,
-        returnUrl: `${window.location.origin}/payment/callback?orderId=${orderData.order_id}`,
+        returnUrl: `${returnBaseUrl}/payment/callback?orderId=${orderData.order_id}`,
       };
 
       console.log("🚀 Opening Cashfree Checkout with options:", checkoutOptions);

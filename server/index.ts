@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import cors from "cors";
 import { setupVite, serveStatic, log } from "./vite";
 import { Server } from "http";
 import { ensureSecretsLoaded } from "./secrets";
@@ -10,6 +11,8 @@ import summaryRoutes from "./routes/summary";
 import userSummaryRoutes from "./routes/user-summary";
 import authRoutes from "./routes/auth";
 import paymentRoutes from "./routes/payment";
+import paymentMockRoutes from "./routes/payment-mock";
+import paymentsRebuildRoutes from "./routes/payments-rebuild";
 import transcribeRoutes from "./routes/deepgram-transcribe";
 import messagesHistoryRoutes from "./routes/messages-history";
 import analyticsRoutes from "./routes/analytics-events";
@@ -28,6 +31,19 @@ app.get("/api/health", (_req, res) => {
 app.get("/", (_req, res) => {
   res.status(200).json({ status: "ok", service: "riya-ai" });
 });
+
+// CORS - Allow requests from frontend (including ngrok for local HTTPS testing)
+app.use(cors({
+  origin: [
+    'http://localhost:8080', 
+    'http://localhost:3000', 
+    'http://127.0.0.1:8080',
+    process.env.NGROK_URL || 'https://prosurgical-nia-carpingly.ngrok-free.dev'
+  ].filter(Boolean), // Remove any undefined values
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // Middleware (after health checks)
 app.use(ensureSecretsLoaded);
@@ -82,6 +98,9 @@ app.use("/api/user-summary", userSummaryRoutes);
 // Payment routes (Cashfree integration)
 app.use(paymentRoutes);
 
+// New payment routes (rebuild - following spec)
+app.use(paymentsRebuildRoutes);
+
 // Transcribe routes (Deepgram speech-to-text)
 app.use(transcribeRoutes);
 
@@ -133,7 +152,7 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
       serveStatic(app);
     }
 
-    const port = parseInt(process.env.PORT || '5000', 10);
+    const port = parseInt(process.env.PORT || '3000', 10);
 
     server.listen({
       port,

@@ -32,12 +32,16 @@ export default defineConfig({
       "@assets": path.resolve(__dirname, "attached_assets"),
     },
   },
-  root: ".",
+  // Override root when used in middleware mode (server/vite.ts sets it)
+  // This allows Vite to resolve files correctly
+  root: path.resolve(__dirname, "client"),
+  // Load .env from project root (parent directory)
+  envDir: path.resolve(__dirname),
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
   },
-  publicDir: "client/public",
+  publicDir: "public",
   server: {
     host: "0.0.0.0",
     port: 8080,

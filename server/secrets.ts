@@ -19,10 +19,18 @@ export async function loadSecrets() {
             .from('app_secrets')
             .select('key, value');
 
-        if (error) {
-            console.error('[Secrets] Failed to fetch secrets:', error);
-            return;
+    if (error) {
+        // Don't fail if secrets table doesn't exist or API key is invalid
+        // This is optional - secrets can be in .env file instead
+        if (error.message?.includes('Invalid API key')) {
+            console.warn('[Secrets] Invalid Supabase API key. Secrets will not be loaded from Supabase.');
+            console.warn('[Secrets] Make sure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are correct in .env');
+            console.warn('[Secrets] Continuing without Supabase secrets - using .env file instead.');
+        } else {
+            console.warn('[Secrets] Failed to fetch secrets (this is optional):', error.message || error);
         }
+        return;
+    }
 
         if (secrets && secrets.length > 0) {
             let count = 0;

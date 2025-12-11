@@ -20,7 +20,7 @@ try {
   if (process.env.DEEPGRAM_API_KEY) {
     deepgram = createClient(process.env.DEEPGRAM_API_KEY);
   } else {
-    console.warn("[Deepgram] DEEPGRAM_API_KEY not found. Transcription will fail.");
+    console.log("[Deepgram] DEEPGRAM_API_KEY not found. Transcription feature is optional - transcription will be disabled.");
   }
 } catch (e) {
   console.error("[Deepgram] Failed to initialize:", e);

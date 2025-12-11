@@ -68,12 +68,60 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
     // Prefer session user, fallback to request body (if auth middleware issue), then dev user
     const userId = (req as any).session?.userId || reqUserId || DEV_USER_ID;
 
-    // ⚠️ HARDCODED CREDENTIAL TEST (Temporary Debug)
-    console.log("⚠️ RUNNING WITH HARDCODED PRODUCTION KEYS");
-    process.env.CASHFREE_APP_ID = "8102882b19835c8f7c11e64346882018";
-    // Obfuscate to pass GitHub Secret Scanning
-    process.env.CASHFREE_SECRET_KEY = "cfsk_ma_prod_" + "2451a84956e768565a5edb722bbdbead" + "_21eab67a";
-    process.env.CASHFREE_ENV = "PRODUCTION";
+    // 🎭 MOCK MODE: Bypass Cashfree entirely for local testing
+    if (process.env.MOCK_PAYMENTS === 'true') {
+      console.log('🎭 [MOCK MODE] Creating mock payment order');
+      const plans = { daily: 19, weekly: 49 };
+      const amount = plans[planType];
+      const orderId = `mock_order_${Date.now()}_${userId.slice(0, 8)}`;
+
+      if (isSupabaseConfigured) {
+        const startDate = new Date();
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() + (planType === 'weekly' ? 7 : 1));
+
+        // Create subscription as active immediately
+        await supabase.from('subscriptions').insert({
+          user_id: userId,
+          plan_type: planType,
+          amount: amount,
+          currency: 'INR',
+          status: 'active',
+          cashfree_order_id: orderId,
+          started_at: startDate.toISOString(),
+          expires_at: endDate.toISOString(),
+          created_at: new Date().toISOString(),
+        });
+
+        // Create payment record
+        await supabase.from('payments').insert({
+          user_id: userId,
+          amount: amount,
+          currency: 'INR',
+          cashfree_order_id: orderId,
+          status: 'success',
+          payment_method: 'mock',
+          created_at: new Date().toISOString(),
+        });
+      }
+
+      return res.json({
+        order_id: orderId,
+        payment_session_id: `mock_session_${orderId}`,
+        amount,
+        currency: 'INR',
+        planType,
+        mock: true,
+      });
+    }
+
+    // ✅ PRODUCTION CREDENTIALS (Load from environment variables)
+    console.log("🔑 Using Production Cashfree Keys from environment");
+    // Keys should be set in .env file, not hardcoded
+    if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY) {
+      console.warn("⚠️ Cashfree keys not found in environment variables");
+    }
+    process.env.CASHFREE_ENV = process.env.CASHFREE_ENV || "PRODUCTION";
 
     // 1. Log the keys (Masked) to prove they are loaded
     const appId = process.env.CASHFREE_APP_ID;
@@ -125,6 +173,13 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
       console.warn("⚠️ Database NOT configured. Skipping subscription insert (Mock Mode).");
     }
 
+    // Use ngrok HTTPS URL for local testing, or production domain
+    // Set NGROK_URL in .env (e.g., https://abc123.ngrok-free.app)
+    // Or use production domain if already whitelisted
+    const baseUrl = process.env.NGROK_URL || process.env.BASE_URL || 'http://localhost:8080';
+    console.log('🌐 [Payment] Using returnUrl base:', baseUrl);
+    console.log('🌐 [Payment] NGROK_URL from env:', process.env.NGROK_URL || 'NOT SET');
+    
     const orderData = await createCashfreeOrder({
       orderId: orderId,
       orderAmount: amount,
@@ -132,7 +187,7 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
       customerName: "Riya User",
       customerEmail: "user@riya.ai",
       customerPhone: randomPhone,
-      returnUrl: `${process.env.v || 'https://riya-ai.site'}/payment/callback?orderId=${orderId}`,
+      returnUrl: `${baseUrl}/payment/callback?orderId=${orderId}`,
       customerId: userId
     });
 
@@ -244,10 +299,82 @@ router.get('/api/payment/status/:orderId', async (req: Request, res: Response) =
 // Verify payment status (POST endpoint - updates database)
 router.post('/api/payment/verify', async (req: Request, res: Response) => {
   try {
-    const { orderId } = req.body;
+    const { orderId, userId: bodyUserId } = req.body;
+    const userId = (req as any).session?.userId || bodyUserId || DEV_USER_ID;
+    console.log('🔍 [Payment Verify] OrderId:', orderId, 'UserId:', userId);
 
     if (!orderId) {
       return res.status(400).json({ error: 'Order ID is required' });
+    }
+
+    // 🎭 MOCK MODE: Always return success for mock payments
+    if (process.env.MOCK_PAYMENTS === 'true') {
+      console.log('🎭 [MOCK MODE] Verifying mock payment:', orderId);
+      
+      if (isSupabaseConfigured) {
+        // Get payment and subscription
+        const { data: payment } = await supabase
+          .from('payments')
+          .select('*, subscriptions(*)')
+          .eq('cashfree_order_id', orderId)
+          .eq('user_id', userId)
+          .single();
+
+        if (payment && payment.status === 'success') {
+          const subscription = payment.subscriptions?.[0];
+          const planType = subscription?.plan_type || 'daily';
+          
+          // Ensure user is upgraded (triggers should handle this, but double-check)
+          const { data: user } = await supabase
+            .from('users')
+            .select('premium_user, subscription_plan')
+            .eq('id', userId)
+            .single();
+
+          // If user is not premium yet, manually upgrade (triggers might not have fired)
+          if (user && !user.premium_user) {
+            console.log('🎭 [MOCK MODE] User not premium yet, manually upgrading...');
+            console.log('🎭 [MOCK MODE] User ID:', userId);
+            console.log('🎭 [MOCK MODE] Plan Type:', planType);
+            
+            const { data: updatedUser, error: updateError } = await supabase
+              .from('users')
+              .update({
+                premium_user: true,
+                subscription_plan: planType,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', userId)
+              .select()
+              .single();
+            
+            if (updateError) {
+              console.error('❌ [MOCK MODE] Failed to upgrade user:', updateError);
+            } else {
+              console.log('✅ [MOCK MODE] User upgraded to premium!', updatedUser);
+            }
+          } else if (user && user.premium_user) {
+            console.log('✅ [MOCK MODE] User is already premium');
+          } else {
+            console.log('⚠️ [MOCK MODE] User not found:', userId);
+          }
+
+          return res.json({
+            success: true,
+            orderId,
+            planType,
+            endDate: subscription?.expires_at,
+            mock: true,
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        orderId,
+        planType: 'daily',
+        mock: true,
+      });
     }
 
     // Get order from database
@@ -337,16 +464,29 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
         console.log('[Payment] ✅ Updated user data:', JSON.stringify(updatedUser, null, 2));
       }
 
-      // INSERT INTO PAYMENTS TABLE (DATA INTEGRITY)
-      // Check if payment already exists to avoid duplicates (optional but good)
+      // UPDATE OR INSERT INTO PAYMENTS TABLE (CRITICAL FOR PAYMENT-BASED ACCESS)
+      // This is the source of truth - payments.status='success' grants chat access
       const { data: existingPayment } = await supabase
         .from('payments')
-        .select('id')
+        .select('id, status')
         .eq('cashfree_order_id', orderId)
         .single();
 
-      if (!existingPayment) {
-        await supabase.from('payments').insert({
+      if (existingPayment) {
+        // Update existing payment to 'success' status
+        await supabase
+          .from('payments')
+          .update({
+            status: 'success',
+            cashfree_payment_id: paymentData.cf_payment_id || existingPayment.cashfree_payment_id || 'UNKNOWN',
+            updated_at: new Date().toISOString()
+          })
+          .eq('cashfree_order_id', orderId);
+        
+        console.log('[Payment] ✅ Updated payment record to success status:', orderId);
+      } else {
+        // Insert new payment record with 'success' status
+        const { error: insertError } = await supabase.from('payments').insert({
           user_id: subscription.user_id,
           subscription_id: subscription.id,
           cashfree_order_id: orderId,
@@ -354,8 +494,15 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
           amount: subscription.amount,
           status: 'success',
           plan_type: subscription.plan_type,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         });
+        
+        if (insertError) {
+          console.error('[Payment] ❌ Failed to insert payment record:', insertError);
+        } else {
+          console.log('[Payment] ✅ Created payment record with success status:', orderId);
+        }
       }
 
       // Log Event
@@ -458,10 +605,10 @@ router.post('/api/payment/webhook', async (req: Request, res: Response) => {
             console.log('[Payment Webhook] ✅ User upgraded:', subscription.user_id, 'Plan:', subscription.plan_type);
           }
 
-          // Insert/update payment record
+          // Insert/update payment record with status='success' (CRITICAL FOR ACCESS)
           const { data: existingPayment } = await supabase
             .from('payments')
-            .select('id')
+            .select('id, status')
             .eq('cashfree_order_id', orderId)
             .single();
 

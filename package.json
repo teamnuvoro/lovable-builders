@@ -5,6 +5,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
+    "dev:server": "PORT=3000 NODE_ENV=development tsx server/index.ts",
     "build": "vite build",
     "build:server": "esbuild api/start.ts --bundle --platform=node --packages=external --format=cjs --outfile=dist/server.cjs",
     "start:server": "node dist/server.cjs",
@@ -13,7 +14,8 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "build:dev": "vite build --mode development",
-    "build:all": "npm run build && npm run build:server"
+    "build:all": "npm run build && npm run build:server",
+    "test:supabase": "node test-supabase-connection.js"
   },
   "dependencies": {
     "@amplitude/analytics-browser": "^2.31.3",
@@ -67,6 +69,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "connect-pg-simple": "^10.0.0",
+    "cors": "^2.8.5",
     "date-fns": "^3.6.0",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.39.1",

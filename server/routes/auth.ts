@@ -187,6 +187,10 @@ router.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
             });
         }
 
+        // Set premium fields - all new users get premium automatically
+        // Set both old schema (premium_user) and new schema (subscription_tier) if it exists
+        const oneYearFromNow = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+        
         const { data: newUser, error: createError } = await supabase
             .from('users')
             .insert({
@@ -195,7 +199,12 @@ router.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
                 phone_number: cleanPhone,
                 gender: 'prefer_not_to_say',
                 persona: 'sweet_supportive', // Default to Riya
-                premium_user: false,
+                premium_user: true, // All new users are premium
+                subscription_plan: 'daily',
+                subscription_expiry: oneYearFromNow, // Old schema - 1 year expiry
+                subscription_tier: 'daily', // New schema - will be ignored if column doesn't exist
+                subscription_start_time: new Date().toISOString(), // New schema
+                subscription_end_time: oneYearFromNow, // New schema - 1 year expiry
                 locale: 'hi-IN',
                 onboarding_complete: true,
                 created_at: new Date().toISOString(),

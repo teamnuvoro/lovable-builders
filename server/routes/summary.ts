@@ -10,7 +10,7 @@ try {
   if (process.env.GEMINI_API_KEY) {
     genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   } else {
-    console.warn("[Summary] GEMINI_API_KEY not found. Summaries will fail.");
+    console.log("[Summary] GEMINI_API_KEY not found. Summary feature is optional - summaries will be disabled.");
   }
 } catch (e) {
   console.error("[Summary] Failed to initialize Gemini:", e);

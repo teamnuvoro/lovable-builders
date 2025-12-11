@@ -38,12 +38,12 @@ export function TopNavbar() {
     premiumUser: boolean;
     subscriptionPlan?: string;
   }>({
-    queryKey: ["/api/user/usage", "navbar"],
+    queryKey: ["/api/user/usage", "navbar", user?.id],
     queryFn: async () => {
-      const response = await apiRequest("POST", "/api/user/usage", {});
+      const response = await apiRequest("POST", "/api/user/usage", { userId: user?.id });
       return response.json();
     },
-    enabled: isChatPage, // Only fetch on chat page
+    enabled: !!user?.id && isChatPage, // Only fetch on chat page when user is logged in
   });
 
   const isPremium = user?.premium_user || userUsage?.premiumUser || false;

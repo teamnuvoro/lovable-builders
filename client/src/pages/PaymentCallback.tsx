@@ -9,7 +9,7 @@ import { trackPaymentSuccessful, trackPaymentFailed } from "@/utils/amplitudeTra
 
 export default function PaymentCallback() {
   const [, setLocation] = useLocation();
-  const { refetchUser } = useAuth();
+  const { refetchUser, user } = useAuth();
   const [status, setStatus] = useState<'loading' | 'success' | 'failed' | 'verifying'>('loading');
   const [message, setMessage] = useState('');
   const [retryCount, setRetryCount] = useState(0);
@@ -22,10 +22,12 @@ export default function PaymentCallback() {
 
   const verifyPayment = async (orderId: string, attempt: number = 0): Promise<boolean> => {
     try {
-      const response = await fetch('/api/payment/verify', {
+      // Use API_BASE to ensure requests go to backend (port 3000) not frontend (port 8080)
+      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const response = await fetch(`${API_BASE}/api/payment/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId })
+        body: JSON.stringify({ orderId, userId: user?.id })
       });
 
       const data = await response.json();

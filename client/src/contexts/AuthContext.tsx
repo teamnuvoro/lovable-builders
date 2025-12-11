@@ -72,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchProfile = async (userId: string, sessionUser?: any) => {
     try {
       // Use maybeSingle() to avoid 406 Error if row is missing/hidden
+      // Always fetch fresh data from database
       const { data, error } = await supabase
         .from('users')
         .select('*')
@@ -132,6 +133,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
+        // Force fresh fetch by clearing query cache first
+        queryClient.invalidateQueries({ queryKey: ['user', session.user.id] });
         await fetchProfile(session.user.id, session.user);
       }
     } catch (error) {

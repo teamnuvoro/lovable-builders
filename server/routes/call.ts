@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { VapiClient } from '@vapi-ai/server-sdk';
+import { startSarvamCall, getConversationMemory } from '../services/sarvam';
 
 const router = Router();
 
@@ -10,6 +11,7 @@ interface CallSession {
   id: string;
   user_id: string;
   vapi_call_id?: string;
+  sarvam_call_id?: string; // Added for Sarvam support
   status: 'started' | 'in_progress' | 'completed' | 'failed' | 'aborted';
   started_at: string;
   ended_at?: string;
@@ -20,7 +22,21 @@ interface CallSession {
 
 router.get('/api/call/config', async (req: Request, res: Response) => {
   try {
-    // Initialize Vapi
+    // Check for Sarvam API key first (preferred for Version 2)
+    const sarvamApiKey = process.env.SARVAM_API_KEY;
+    
+    if (sarvamApiKey) {
+      console.log('[Call Config] Using Sarvam AI for voice calls');
+      return res.json({
+        ready: true,
+        provider: 'sarvam',
+        apiKey: sarvamApiKey, // Frontend will use this
+        // Note: In production, don't expose full API key to frontend
+        // Consider using a public key or token instead
+      });
+    }
+
+    // Fallback to Vapi (legacy)
     let vapi: any = null;
     try {
       if (process.env.VAPI_PRIVATE_KEY) {
@@ -36,12 +52,14 @@ router.get('/api/call/config', async (req: Request, res: Response) => {
     if (!publicKey) {
       return res.status(503).json({
         ready: false,
-        error: 'Voice calling not configured'
+        error: 'Voice calling not configured. Set SARVAM_API_KEY or VAPI_PUBLIC_KEY',
+        provider: null
       });
     }
 
     res.json({
       ready: true,
+      provider: 'vapi',
       publicKey
     });
   } catch (error: any) {
@@ -53,7 +71,7 @@ router.get('/api/call/config', async (req: Request, res: Response) => {
 router.post('/api/call/start', async (req: Request, res: Response) => {
   try {
     const userId = (req as any).session?.userId || DEV_USER_ID;
-    const { vapiCallId, metadata } = req.body;
+    const { vapiCallId, sarvamCallId, metadata, provider } = req.body;
 
     if (!isSupabaseConfigured) {
       return res.json({
@@ -88,14 +106,48 @@ router.post('/api/call/start', async (req: Request, res: Response) => {
       });
     }
 
+    // If using Sarvam and no call ID provided, start a new Sarvam call
+    let finalCallId = vapiCallId || sarvamCallId;
+    if ((provider === 'sarvam' || process.env.SARVAM_API_KEY) && !finalCallId) {
+      try {
+        // Get conversation memory for context
+        const conversationHistory = await getConversationMemory(userId, 10);
+        
+        // Get user persona for system prompt
+        const { data: userData } = await supabase
+          .from('users')
+          .select('persona')
+          .eq('id', userId)
+          .single();
+
+        const systemPrompt = `You are Riya, a warm and caring AI companion. You speak in a mix of Hindi and English (Hinglish) naturally. You're supportive, understanding, and always there to listen. Keep responses conversational and empathetic.`;
+
+        const sarvamResponse = await startSarvamCall({
+          userId,
+          conversationHistory,
+          systemPrompt,
+          voiceSettings: {
+            language: 'hi-IN',
+          }
+        });
+
+        finalCallId = sarvamResponse.callId;
+        console.log('[Call Start] Sarvam call initiated:', finalCallId);
+      } catch (sarvamError: any) {
+        console.error('[Call Start] Sarvam call failed:', sarvamError);
+        // Fallback to Vapi if Sarvam fails
+      }
+    }
+
     const { data: session, error } = await supabase
       .from('call_sessions')
       .insert({
         user_id: userId,
-        vapi_call_id: vapiCallId,
+        vapi_call_id: provider === 'vapi' ? finalCallId : undefined,
+        sarvam_call_id: provider === 'sarvam' ? finalCallId : undefined,
         status: 'started',
         started_at: new Date().toISOString(),
-        metadata
+        metadata: { ...metadata, provider: provider || (process.env.SARVAM_API_KEY ? 'sarvam' : 'vapi') }
       })
       .select()
       .single();
@@ -118,7 +170,11 @@ router.post('/api/call/start', async (req: Request, res: Response) => {
         user_id: userId,
         event_type: 'call_started',
         call_session_id: session.id,
-        metadata: { vapi_call_id: vapiCallId }
+        metadata: { 
+          vapi_call_id: vapiCallId,
+          sarvam_call_id: sarvamCallId,
+          provider: provider || (process.env.SARVAM_API_KEY ? 'sarvam' : 'vapi')
+        }
       });
 
     res.json({

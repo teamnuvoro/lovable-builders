@@ -1,3 +1,37 @@
+// =====================================================
+// RAZORPAY CONFIGURATION (Version 2)
+// =====================================================
+
+export function getRazorpayCredentials() {
+  return {
+    keyId: (process.env.RAZORPAY_KEY_ID ?? "").trim(),
+    keySecret: (process.env.RAZORPAY_KEY_SECRET ?? "").trim(),
+  };
+}
+
+export function getRazorpayPlanConfig() {
+  return {
+    currency: "INR",
+    plans: {
+      daily: 19,   // ₹19 = 1900 paise
+      weekly: 49, // ₹49 = 4900 paise
+    },
+  };
+}
+
+export function getClientPaymentConfig() {
+  const { currency, plans } = getRazorpayPlanConfig();
+  return {
+    paymentProvider: 'razorpay',
+    currency,
+    plans,
+  };
+}
+
+// =====================================================
+// CASHFREE CONFIGURATION (Legacy - Kept for reference)
+// =====================================================
+
 const RAW_CASHFREE_ENV = (process.env.CASHFREE_ENV || "TEST").toUpperCase();
 const SECRET_KEY = process.env.CASHFREE_SECRET_KEY || "";
 
@@ -26,15 +60,6 @@ export function getCashfreePlanConfig() {
       daily: 19,
       weekly: 49,
     },
-  };
-}
-
-export function getClientPaymentConfig() {
-  const { currency, plans } = getCashfreePlanConfig();
-  return {
-    cashfreeMode,
-    currency,
-    plans,
   };
 }
 

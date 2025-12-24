@@ -112,15 +112,30 @@ export async function checkMessageQuota(
     if (countError) {
       console.error('[Message Quota] Error counting messages:', countError);
       // Fallback: count manually
-      const { count } = await supabase
+      const { count, error: fallbackError } = await supabase
         .from('message_logs')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', userId)
         .eq('is_user_message', true)
         .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
 
+      // If both methods fail, allow the message (fail open for new users)
+      // This ensures new users can always send their first messages
+      if (fallbackError) {
+        console.error('[Message Quota] Fallback count also failed:', fallbackError);
+        // Fail open: allow message if we can't determine count (protects new users)
+        return {
+          allowed: true,
+          messageCount: 0,
+          limit: FREE_MESSAGE_LIMIT,
+          subscriptionTier: 'free',
+          reason: 'Could not verify message count, allowing message'
+        };
+      }
+
       const msgCount = count || 0;
 
+      // Allow if count is less than limit (0-19 can send, 20+ blocked)
       if (msgCount >= FREE_MESSAGE_LIMIT) {
         return {
           allowed: false,
@@ -141,6 +156,8 @@ export async function checkMessageQuota(
 
     const msgCount = messageCount || 0;
 
+    // Allow if count is less than limit (0-19 can send, 20+ blocked)
+    // This ensures new users (count = 0) can send their first 20 messages
     if (msgCount >= FREE_MESSAGE_LIMIT) {
       return {
         allowed: false,
@@ -160,9 +177,14 @@ export async function checkMessageQuota(
 
   } catch (error: any) {
     console.error('[Message Quota] Unexpected error:', error);
+    // Fail open: allow message if there's an unexpected error (protects new users)
+    // This ensures new users aren't blocked by system errors
     return {
-      allowed: false,
-      reason: 'Error checking message quota'
+      allowed: true,
+      messageCount: 0,
+      limit: FREE_MESSAGE_LIMIT,
+      subscriptionTier: 'free',
+      reason: 'Error checking quota, allowing message to protect new users'
     };
   }
 }

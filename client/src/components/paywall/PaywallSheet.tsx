@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,10 +17,10 @@ interface PaywallSheetProps {
   messageCount?: number;
 }
 
-// Declare Cashfree global type
+// Declare Razorpay global type
 declare global {
   interface Window {
-    Cashfree: any;
+    Razorpay: any;
   }
 }
 
@@ -29,9 +29,10 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
   const { toast } = useToast();
 
   const { data: paymentConfig } = useQuery<{
-    cashfreeMode: "sandbox" | "production";
+    paymentProvider: string;
     currency: string;
     plans: { daily: number; weekly: number };
+    keyId?: string;
   }>({
     queryKey: ["/api/payment/config"],
     queryFn: async () => {
@@ -45,55 +46,48 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
   
   const createOrderMutation = useMutation({
     mutationFn: async (planType: 'daily' | 'weekly') => {
-      const response = await apiRequest('POST', '/api/payment/create-order', { 
+      const response = await apiRequest('POST', '/api/payments/initiate', { 
         planType,
-        userId: user?.id 
+        userId: user?.id,
+        userPhone: user?.phone_number || '9999999999' // Default phone if not available
       });
       return response.json();
     },
   });
 
   const planAmounts = paymentConfig?.plans ?? { daily: 19, weekly: 49 };
+  const razorpayKeyId = paymentConfig?.keyId || import.meta.env.VITE_RAZORPAY_KEY_ID;
 
-  const cashfreeMode = paymentConfig?.cashfreeMode || "production";
-
-  const loadCashfreeSdk = (mode: "sandbox" | "production") => {
+  const loadRazorpaySdk = () => {
     return new Promise((resolve, reject) => {
-      // Check if SDK is already loaded and ready
-      if (window.Cashfree && typeof window.Cashfree === 'function') {
+      // Check if SDK is already loaded
+      if (window.Razorpay) {
         resolve(true);
         return;
       }
 
-      const scriptId = 'cashfree-sdk';
+      const scriptId = 'razorpay-sdk';
       const existingScript = document.getElementById(scriptId);
-      const src = "https://sdk.cashfree.com/js/v3/cashfree.js";
+      const src = "https://checkout.razorpay.com/v1/checkout.js";
 
-      // If script exists and is the same, wait for it to load
-      if (existingScript && (existingScript as HTMLScriptElement).src === src) {
-        // Wait for Cashfree to be available
+      // If script exists, wait for it to load
+      if (existingScript) {
         const checkInterval = setInterval(() => {
-          if (window.Cashfree && typeof window.Cashfree === 'function') {
+          if (window.Razorpay) {
             clearInterval(checkInterval);
             resolve(true);
           }
         }, 100);
 
-        // Timeout after 10 seconds
         setTimeout(() => {
           clearInterval(checkInterval);
-          if (window.Cashfree && typeof window.Cashfree === 'function') {
+          if (window.Razorpay) {
             resolve(true);
           } else {
-            reject(new Error('Cashfree SDK failed to initialize'));
+            reject(new Error('Razorpay SDK failed to initialize'));
           }
         }, 10000);
         return;
-      }
-
-      // Remove existing script if different
-      if (existingScript) {
-        existingScript.remove();
       }
 
       // Create and load new script
@@ -103,27 +97,15 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
       script.async = true;
       
       script.onload = () => {
-        // Wait for Cashfree to be available after script loads
-        const checkInterval = setInterval(() => {
-          if (window.Cashfree && typeof window.Cashfree === 'function') {
-            clearInterval(checkInterval);
-            resolve(true);
-          }
-        }, 100);
-
-        // Timeout after 10 seconds
-        setTimeout(() => {
-          clearInterval(checkInterval);
-          if (window.Cashfree && typeof window.Cashfree === 'function') {
-            resolve(true);
-          } else {
-            reject(new Error('Cashfree SDK failed to initialize'));
-          }
-        }, 10000);
+        if (window.Razorpay) {
+          resolve(true);
+        } else {
+          reject(new Error('Razorpay SDK failed to initialize'));
+        }
       };
       
       script.onerror = () => {
-        reject(new Error('Failed to load Cashfree SDK script'));
+        reject(new Error('Failed to load Razorpay SDK script'));
       };
       
       document.head.appendChild(script);
@@ -134,11 +116,11 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
     try {
       setIsProcessing(true);
 
-      // Load correct SDK first
+      // Load Razorpay SDK first
       try {
-        await loadCashfreeSdk(cashfreeMode);
+        await loadRazorpaySdk();
       } catch (sdkError) {
-        console.error('Failed to load Cashfree SDK:', sdkError);
+        console.error('Failed to load Razorpay SDK:', sdkError);
         toast({
           title: "Payment Error",
           description: "Failed to load payment system. Please refresh the page and try again.",
@@ -151,114 +133,117 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
       analytics.track("checkout_started", { plan: planType, amount: planAmounts[planType] });
       trackPlanSelected(planType, planAmounts[planType], planType === 'daily' ? 1 : 7);
 
-      // 1. Call backend to get Session ID (using mutateAsync to await result)
+      // 1. Call backend to create Razorpay order
       const orderData = await createOrderMutation.mutateAsync(planType);
 
       console.log("🎟️ Received Order Data:", orderData);
 
-      // 🛑 2. TRAP THE ERROR (The fix)
-      // If the server sent { error: true }, SHOW ME THE REASON.
       if (orderData.error) {
         console.error("Detailed Error:", orderData);
-        alert("⚠️ BACKEND FAILED: " + orderData.details);
-        setIsProcessing(false);
-        return; // Stop. Do not open the black screen.
-      }
-
-      // 🎭 MOCK MODE: Skip Cashfree checkout, redirect directly to callback
-      if (orderData.mock) {
-        console.log('🎭 [MOCK MODE] Skipping Cashfree checkout, redirecting to callback');
-        toast({
-          title: "Payment Successful!",
-          description: "Mock payment completed. Upgrading your account...",
-        });
-        // Redirect to callback page which will verify and upgrade
-        window.location.href = `/payment/callback?orderId=${orderData.order_id}`;
-        setIsProcessing(false);
-        return;
-      }
-
-      // 3. Verify Session ID exists
-      if (!orderData || !orderData.payment_session_id) {
-        console.error("Backend Response missing session ID:", orderData);
-        alert("⚠️ CRITICAL: Server returned empty Session ID.");
-        setIsProcessing(false); // Reset processing on error
-        return;
-      }
-
-      // 3. Initialize SDK
-      if (!window.Cashfree) {
-        throw new Error("Cashfree SDK failed to load. Please check your internet connection.");
-      }
-      const cashfree = window.Cashfree({
-        mode: cashfreeMode,
-      });
-
-      if (typeof cashfree.checkout !== 'function') {
-        console.error("Cashfree SDK loaded but checkout is missing.");
-        alert("Payment Error: AdBlocker detected. Please disable it.");
-        setIsProcessing(false); // Reset processing on error
-        return;
-      }
-
-      // 4. Open Checkout
-      // Use ngrok URL if available (for HTTPS whitelisting), otherwise use current origin
-      const returnBaseUrl = import.meta.env.VITE_NGROK_URL || window.location.origin;
-      console.log('🌐 [Frontend] VITE_NGROK_URL from env:', import.meta.env.VITE_NGROK_URL || 'NOT SET');
-      console.log('🌐 [Frontend] Using returnUrl base:', returnBaseUrl);
-      const checkoutOptions = {
-        paymentSessionId: orderData.payment_session_id,
-        returnUrl: `${returnBaseUrl}/payment/callback?orderId=${orderData.order_id}`,
-      };
-
-      console.log("🚀 Opening Cashfree Checkout with options:", checkoutOptions);
-
-      cashfree.checkout(checkoutOptions).then((result: any) => {
-        if (result.error) {
-          console.error("User closed popup or failed:", result.error);
-          toast({
-            title: "Payment Failed",
-            description: result.error.message || "Something went wrong with the payment",
-            variant: "destructive",
-          });
-          setIsProcessing(false); // Reset processing if user closes or error
-        }
-        if (result.redirect) {
-          console.log("Payment Redirecting...");
-          // Don't verify here - it will be done in the callback page
-          setIsProcessing(false); // Reset processing as user is redirected
-        }
-      }).catch((error: any) => {
-        console.error('Cashfree checkout error:', error);
         toast({
           title: "Payment Error",
-          description: "Failed to open payment page. Please try again.",
+          description: orderData.details || "Failed to create payment order",
+          variant: "destructive",
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      if (!orderData.order_id || !razorpayKeyId) {
+        console.error("Missing order_id or Razorpay key");
+        toast({
+          title: "Payment Error",
+          description: "Payment configuration error. Please try again.",
+          variant: "destructive",
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      // 2. Initialize Razorpay Checkout
+      const options = {
+        key: razorpayKeyId,
+        amount: orderData.amount_paise, // Amount in paise
+        currency: orderData.currency || 'INR',
+        name: 'Riya AI',
+        description: `${planType === 'daily' ? 'Daily' : 'Weekly'} Pass - Unlimited Chats`,
+        order_id: orderData.order_id,
+        handler: function (response: any) {
+          console.log('✅ Payment successful:', response);
+          
+          // Verify payment with backend
+          apiRequest('POST', '/api/payment/verify', {
+            orderId: response.razorpay_order_id,
+            paymentId: response.razorpay_payment_id,
+            signature: response.razorpay_signature,
+            userId: user?.id
+          })
+          .then(async (verifyResponse) => {
+            const verifyData = await verifyResponse.json();
+            if (verifyData.success) {
+              toast({
+                title: "Payment Successful!",
+                description: "Your account has been upgraded. Enjoy unlimited chats!",
+              });
+              // Redirect to chat or refresh
+              window.location.href = '/chat';
+            } else {
+              toast({
+                title: "Payment Verification Failed",
+                description: verifyData.error || "Please contact support if payment was deducted.",
+                variant: "destructive",
+              });
+            }
+          })
+          .catch((error) => {
+            console.error('Payment verification error:', error);
+            toast({
+              title: "Payment Verification Error",
+              description: "Payment may have succeeded. Please check your account status.",
+              variant: "destructive",
+            });
+          });
+          
+          setIsProcessing(false);
+        },
+        prefill: {
+          name: user?.name || 'User',
+          email: user?.email || `user_${user?.id}@app.local`,
+          contact: user?.phone_number || '9999999999',
+        },
+        theme: {
+          color: '#6366f1', // Indigo color
+        },
+        modal: {
+          ondismiss: function() {
+            console.log('Payment modal closed');
+            setIsProcessing(false);
+          }
+        }
+      };
+
+      console.log("🚀 Opening Razorpay Checkout with options:", { ...options, key: '[HIDDEN]' });
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.on('payment.failed', function (response: any) {
+        console.error('Payment failed:', response);
+        toast({
+          title: "Payment Failed",
+          description: response.error?.description || "Something went wrong with the payment",
           variant: "destructive",
         });
         setIsProcessing(false);
       });
 
+      razorpay.open();
+      setIsProcessing(false); // Reset immediately since modal is open
+
     } catch (error: any) {
       console.error('Payment error:', error);
 
-      // Extract error message from various formats
       let errorMessage = "Failed to initiate payment";
       if (error?.message) {
-        const msg = error.message;
-        // Handle format: "500: {"error":"..."} (Trace ID: ...)"
-        const jsonMatch = msg.match(/\{[\s\S]*"error"[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            const errorObj = JSON.parse(jsonMatch[0]);
-            errorMessage = errorObj.error || errorObj.message || msg;
-          } catch {
-            // If JSON parse fails, try to extract text after "error"
-            const errorMatch = msg.match(/"error"\s*:\s*"([^"]+)"/);
-            errorMessage = errorMatch ? errorMatch[1] : msg;
-          }
-        } else {
-          errorMessage = msg;
-        }
+        errorMessage = error.message;
       }
 
       toast({
@@ -376,7 +361,7 @@ export function PaywallSheet({ open, onOpenChange, messageCount }: PaywallSheetP
         <div className="text-center pt-2">
           <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
             <ShieldCheck className="w-3 h-3" />
-            Secure payment powered by Cashfree
+            Secure payment powered by Razorpay
           </p>
         </div>
       </DialogContent>

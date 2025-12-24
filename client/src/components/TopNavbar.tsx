@@ -7,7 +7,6 @@ import {
   Settings,
   LogOut,
   Crown,
-  Image as ImageIcon,
   BarChart3,
   MessageCircle,
 } from "lucide-react";
@@ -177,28 +176,6 @@ export function TopNavbar() {
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
                         </div>
                         <span className="font-medium text-sm">Relationship Profile</span>
-                      </button>
-                    </Link>
-
-                    {/* Gallery */}
-                    <Link href="/gallery">
-                      <button
-                        onClick={() => {
-                          analytics.track('navbar_click', {
-                            destination: 'gallery',
-                            user_type: user?.premium_user ? 'premium' : 'free'
-                          });
-                          setIsDropdownOpen(false);
-                        }}
-                        className="w-full px-4 py-3 text-left text-gray-700 hover:bg-purple-50 transition-colors flex items-center gap-3 group"
-                      >
-                        <div className="p-2 bg-purple-100 rounded-full group-hover:bg-purple-200 transition-colors">
-                          <ImageIcon className="w-4 h-4 text-purple-600" />
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="font-medium text-sm">Private Gallery</span>
-                          <span className="text-[10px] text-purple-600 font-bold uppercase tracking-wide">New Content</span>
-                        </div>
                       </button>
                     </Link>
 

@@ -1,41 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { supabase, isSupabaseConfigured } from '../supabase';
-import crypto from 'crypto';
+import { 
+  createRazorpayOrder, 
+  verifyRazorpaySignature, 
+  getRazorpayPaymentStatus,
+  getRazorpayOrder 
+} from '../services/razorpay';
+import { getRazorpayPlanConfig } from '../config';
 
 const router = Router();
-
-// =====================================================
-// HELPER: Get Cashfree API base URL
-// =====================================================
-function getCashfreeBaseUrl(): string {
-  const env = process.env.CASHFREE_ENV || 'PRODUCTION';
-  return env === 'PRODUCTION'
-    ? 'https://api.cashfree.com/pg'
-    : 'https://sandbox.cashfree.com/pg';
-}
-
-// =====================================================
-// HELPER: Verify Cashfree webhook signature
-// =====================================================
-function verifyCashfreeSignature(
-  body: string,
-  timestamp: string,
-  signature: string
-): boolean {
-  const secret = process.env.CASHFREE_SECRET_KEY;
-  if (!secret) {
-    console.error('[Webhook] CASHFREE_SECRET_KEY not configured');
-    return false;
-  }
-
-  const signedString = `${timestamp}.${body}`;
-  const expectedSignature = crypto
-    .createHmac('sha256', secret)
-    .update(signedString)
-    .digest('base64');
-
-  return signature === expectedSignature;
-}
 
 // =====================================================
 // FLOW 2: Initiate Payment
@@ -61,7 +34,7 @@ router.post('/api/payments/initiate', async (req: Request, res: Response) => {
     // ===== STEP 1: Check for existing pending transaction (prevent double payment) =====
     const { data: existingPending } = await supabase
       .from('payment_transactions')
-      .select('id, cashfree_order_id, created_at')
+      .select('id, razorpay_order_id, created_at')
       .eq('user_id', userId)
       .eq('status', 'pending')
       .gt('created_at', new Date(Date.now() - 5 * 60 * 1000).toISOString()) // Last 5 minutes
@@ -70,7 +43,7 @@ router.post('/api/payments/initiate', async (req: Request, res: Response) => {
       .single();
 
     if (existingPending) {
-      console.log('[Payment Initiate] Reusing existing pending transaction:', existingPending.cashfree_order_id);
+      console.log('[Payment Initiate] Reusing existing pending transaction:', existingPending.razorpay_order_id);
       // Return existing transaction
       const { data: existingTxn } = await supabase
         .from('payment_transactions')
@@ -81,29 +54,45 @@ router.post('/api/payments/initiate', async (req: Request, res: Response) => {
       return res.json({
         success: true,
         transaction_id: existingPending.id,
-        order_id: existingPending.cashfree_order_id,
+        order_id: existingPending.razorpay_order_id,
         message: 'Reusing existing pending transaction'
       });
     }
 
     // ===== STEP 2: Determine amount (in paise) =====
+    const planConfig = getRazorpayPlanConfig();
     const amounts = {
-      daily: 9900,   // ₹99 = 9900 paise
-      weekly: 49900  // ₹499 = 49900 paise
+      daily: planConfig.plans.daily * 100,   // ₹19 = 1900 paise
+      weekly: planConfig.plans.weekly * 100  // ₹49 = 4900 paise
     };
 
     const amountPaise = amounts[planType as keyof typeof amounts];
     const amountINR = amountPaise / 100;
 
-    // ===== STEP 3: Generate unique order ID =====
-    const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // ===== STEP 3: Generate unique receipt ID =====
+    const receiptId = `receipt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // ===== STEP 4: Create pending transaction record =====
+    // ===== STEP 4: Create Razorpay order =====
+    const razorpayOrder = await createRazorpayOrder({
+      amount: amountPaise,
+      currency: 'INR',
+      receipt: receiptId,
+      notes: {
+        user_id: userId,
+        plan_type: planType,
+        user_phone: userPhone
+      }
+    });
+
+    const orderId = razorpayOrder.id;
+    console.log('[Payment Initiate] Razorpay order created:', orderId);
+
+    // ===== STEP 5: Create pending transaction record =====
     const { data: transaction, error: txnError } = await supabase
       .from('payment_transactions')
       .insert({
         user_id: userId,
-        cashfree_order_id: orderId,
+        razorpay_order_id: orderId,
         plan_type: planType,
         amount_paise: amountPaise,
         status: 'pending'
@@ -118,59 +107,16 @@ router.post('/api/payments/initiate', async (req: Request, res: Response) => {
 
     console.log('[Payment Initiate] Created transaction:', transaction.id, 'Order:', orderId);
 
-    // ===== STEP 5: Call Cashfree API to create order =====
-    const cashfreeBaseUrl = getCashfreeBaseUrl();
-    const appUrl = process.env.BASE_URL || process.env.NGROK_URL || 'http://localhost:8080';
-
-    const cashfreeResponse = await fetch(`${cashfreeBaseUrl}/orders`, {
-      method: 'POST',
-      headers: {
-        'X-Api-Version': '2023-08-01',
-        'X-Client-Id': process.env.CASHFREE_APP_ID!,
-        'X-Client-Secret': process.env.CASHFREE_SECRET_KEY!,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        order_id: orderId,
-        order_amount: amountINR,
-        order_currency: 'INR',
-        customer_details: {
-          customer_id: userId,
-          customer_phone: userPhone,
-          customer_email: `user_${userId}@app.local`
-        },
-        order_meta: {
-          return_url: `${appUrl}/payment-callback?transaction_id=${transaction.id}`,
-          notify_url: `${appUrl}/api/payment-webhook`
-        }
-      })
-    });
-
-    const cashfreeData = await cashfreeResponse.json();
-
-    if (!cashfreeResponse.ok) {
-      console.error('[Payment Initiate] Cashfree API error:', cashfreeData);
-      
-      // Mark transaction as failed
-      await supabase
-        .from('payment_transactions')
-        .update({ status: 'failed', updated_at: new Date().toISOString() })
-        .eq('id', transaction.id);
-
-      return res.status(500).json({ 
-        error: 'Failed to create Cashfree order',
-        details: cashfreeData 
-      });
-    }
-
-    // ===== STEP 6: Return payment link to frontend =====
+    // ===== STEP 6: Return order details to frontend =====
     return res.json({
       success: true,
       transaction_id: transaction.id,
-      payment_link: cashfreeData.payment_link || cashfreeData.data?.payment_link,
       order_id: orderId,
       amount: amountINR,
-      plan_type: planType
+      amount_paise: amountPaise,
+      currency: 'INR',
+      plan_type: planType,
+      key: process.env.RAZORPAY_KEY_ID // Frontend needs this for Razorpay Checkout
     });
 
   } catch (error: any) {
@@ -180,22 +126,29 @@ router.post('/api/payments/initiate', async (req: Request, res: Response) => {
 });
 
 // =====================================================
-// FLOW 3: Payment Webhook Handler
+// FLOW 3: Payment Webhook Handler (Razorpay)
 // POST /api/payment-webhook
 // =====================================================
 router.post('/api/payment-webhook', async (req: Request, res: Response) => {
   try {
     // ===== STEP 1: Verify webhook signature =====
-    const signature = req.headers['x-webhook-signature'] as string;
-    const timestamp = req.headers['x-webhook-timestamp'] as string;
-    const body = JSON.stringify(req.body);
+    const razorpaySignature = req.headers['x-razorpay-signature'] as string;
+    const razorpayOrderId = req.body.payload?.payment?.entity?.order_id;
+    const razorpayPaymentId = req.body.payload?.payment?.entity?.id;
+    const paymentStatus = req.body.payload?.payment?.entity?.status;
 
-    if (!signature || !timestamp) {
-      console.error('[Webhook] Missing signature or timestamp');
-      return res.status(400).json({ error: 'Missing signature or timestamp' });
+    if (!razorpaySignature) {
+      console.error('[Webhook] Missing Razorpay signature');
+      return res.status(400).json({ error: 'Missing signature' });
     }
 
-    const isValid = verifyCashfreeSignature(body, timestamp, signature);
+    // Verify signature
+    const isValid = verifyRazorpaySignature({
+      orderId: razorpayOrderId,
+      paymentId: razorpayPaymentId,
+      signature: razorpaySignature
+    });
+
     if (!isValid) {
       console.error('[Webhook] ⚠️ SIGNATURE MISMATCH - REJECTING');
       return res.status(401).json({ error: 'Signature verification failed' });
@@ -203,15 +156,7 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
 
     console.log('[Webhook] ✅ Signature verified');
 
-    // ===== STEP 2: Extract payment data =====
-    const { data } = req.body;
-    const orderStatus = data?.order?.order_status;
-    const orderId = data?.order?.order_id;
-    const cfPaymentId = data?.payment?.cf_payment_id;
-
-    console.log(`[Webhook] Processing payment: ${orderId}, Status: ${orderStatus}`);
-
-    if (!orderId) {
+    if (!razorpayOrderId) {
       return res.status(400).json({ error: 'Missing order_id' });
     }
 
@@ -219,17 +164,17 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
       return res.status(503).json({ error: 'Database not configured' });
     }
 
-    // ===== STEP 3: Fetch pending transaction from DB =====
+    // ===== STEP 2: Fetch pending transaction from DB =====
     const { data: transaction, error: fetchError } = await supabase
       .from('payment_transactions')
       .select('*')
-      .eq('cashfree_order_id', orderId)
+      .eq('razorpay_order_id', razorpayOrderId)
       .eq('status', 'pending')
       .single();
 
     if (fetchError || !transaction) {
-      console.log('[Webhook] ⚠️ No pending transaction found for order:', orderId);
-      // Still return 200 so Cashfree doesn't retry
+      console.log('[Webhook] ⚠️ No pending transaction found for order:', razorpayOrderId);
+      // Still return 200 so Razorpay doesn't retry
       return res.status(200).json({ 
         success: false, 
         message: 'Transaction not found or already processed' 
@@ -239,8 +184,8 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
     const userId = transaction.user_id;
     const planType = transaction.plan_type;
 
-    // ===== STEP 4: Verify payment status =====
-    if (orderStatus !== 'PAID') {
+    // ===== STEP 3: Verify payment status =====
+    if (paymentStatus !== 'captured' && paymentStatus !== 'authorized') {
       // Payment failed or pending
       await supabase
         .from('payment_transactions')
@@ -250,30 +195,25 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
         })
         .eq('id', transaction.id);
 
-      console.log('[Webhook] ❌ Payment failed for order:', orderId);
+      console.log('[Webhook] ❌ Payment failed for order:', razorpayOrderId, 'Status:', paymentStatus);
       return res.status(200).json({ success: false, message: 'Payment not completed' });
     }
 
-    // ===== STEP 5: Double-check with Cashfree API (redundancy) =====
-    const cashfreeBaseUrl = getCashfreeBaseUrl();
-    const verifyResponse = await fetch(`${cashfreeBaseUrl}/orders/${orderId}`, {
-      method: 'GET',
-      headers: {
-        'X-Api-Version': '2023-08-01',
-        'X-Client-Id': process.env.CASHFREE_APP_ID!,
-        'X-Client-Secret': process.env.CASHFREE_SECRET_KEY!
+    // ===== STEP 4: Double-check with Razorpay API (redundancy) =====
+    try {
+      const paymentData = await getRazorpayPaymentStatus(razorpayPaymentId);
+      const verifiedStatus = paymentData.status;
+
+      if (verifiedStatus !== 'captured' && verifiedStatus !== 'authorized') {
+        console.log('[Webhook] ⚠️ Razorpay API verification failed. Status:', verifiedStatus);
+        return res.status(200).json({ success: false, message: 'Payment verification failed' });
       }
-    });
-
-    const verifyData = await verifyResponse.json();
-    const verifiedStatus = verifyData.order_status || verifyData.data?.order_status;
-
-    if (verifiedStatus !== 'PAID' && verifiedStatus !== 'ACTIVE') {
-      console.log('[Webhook] ⚠️ Cashfree API verification failed. Status:', verifiedStatus);
-      return res.status(200).json({ success: false, message: 'Payment verification failed' });
+    } catch (verifyError) {
+      console.error('[Webhook] Error verifying payment with Razorpay:', verifyError);
+      // Continue anyway - webhook signature was valid
     }
 
-    // ===== STEP 6: Calculate subscription end time =====
+    // ===== STEP 5: Calculate subscription end time =====
     const now = new Date();
     let subscriptionEndTime: Date;
 
@@ -285,12 +225,13 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid plan type' });
     }
 
-    // ===== STEP 7: Update transaction as success (idempotent) =====
+    // ===== STEP 6: Update transaction as success (idempotent) =====
     const { error: updateTxnError } = await supabase
       .from('payment_transactions')
       .update({
         status: 'success',
-        cashfree_payment_id: cfPaymentId,
+        razorpay_payment_id: razorpayPaymentId,
+        razorpay_signature: razorpaySignature,
         payment_timestamp: now.toISOString(),
         updated_at: now.toISOString()
       })
@@ -302,7 +243,7 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Failed to update transaction' });
     }
 
-    // ===== STEP 8: Get old tier for logging =====
+    // ===== STEP 7: Get old tier for logging =====
     const { data: userData } = await supabase
       .from('users')
       .select('subscription_tier')
@@ -311,7 +252,7 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
 
     const oldTier = userData?.subscription_tier || 'free';
 
-    // ===== STEP 9: Update user subscription =====
+    // ===== STEP 8: Update user subscription =====
     const { error: updateUserError } = await supabase
       .from('users')
       .update({
@@ -327,7 +268,7 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Failed to update user subscription' });
     }
 
-    // ===== STEP 10: Log to subscription history =====
+    // ===== STEP 9: Log to subscription history =====
     const { error: historyError } = await supabase
       .from('subscription_history')
       .insert({
@@ -345,7 +286,7 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
 
     console.log(`[Webhook] ✅ SUCCESS: User ${userId} upgraded to ${planType} until ${subscriptionEndTime.toISOString()}`);
 
-    // ===== RETURN 200 TO CASHFREE =====
+    // ===== RETURN 200 TO RAZORPAY =====
     return res.status(200).json({
       success: true,
       message: 'Webhook processed successfully',
@@ -355,10 +296,138 @@ router.post('/api/payment-webhook', async (req: Request, res: Response) => {
 
   } catch (error: any) {
     console.error('[Webhook] Error:', error);
-    // Always return 200 on error so Cashfree doesn't retry infinitely
+    // Always return 200 on error so Razorpay doesn't retry infinitely
     return res.status(200).json({ 
       success: false, 
       error: error.message 
+    });
+  }
+});
+
+// =====================================================
+// POST /api/payment/verify
+// Verify payment after callback (manual verification)
+// =====================================================
+router.post('/api/payment/verify', async (req: Request, res: Response) => {
+  try {
+    const { orderId, paymentId, signature, userId: bodyUserId } = req.body;
+    const userId = (req as any).session?.userId || bodyUserId;
+
+    console.log('🔍 [Payment Verify] OrderId:', orderId, 'PaymentId:', paymentId, 'UserId:', userId);
+
+    if (!orderId || !paymentId || !signature) {
+      return res.status(400).json({ error: 'Missing required fields: orderId, paymentId, signature' });
+    }
+
+    // ===== STEP 1: Verify signature =====
+    const isValid = verifyRazorpaySignature({
+      orderId,
+      paymentId,
+      signature
+    });
+
+    if (!isValid) {
+      console.error('[Payment Verify] ❌ Signature verification failed');
+      return res.status(400).json({ error: 'Invalid payment signature' });
+    }
+
+    console.log('[Payment Verify] ✅ Signature verified');
+
+    if (!isSupabaseConfigured) {
+      return res.status(503).json({ error: 'Database not configured' });
+    }
+
+    // ===== STEP 2: Get transaction from database =====
+    const { data: transaction, error: fetchError } = await supabase
+      .from('payment_transactions')
+      .select('*')
+      .eq('razorpay_order_id', orderId)
+      .single();
+
+    if (fetchError || !transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    // ===== STEP 3: Verify payment status with Razorpay =====
+    const paymentData = await getRazorpayPaymentStatus(paymentId);
+    const paymentStatus = paymentData.status;
+
+    if (paymentStatus !== 'captured' && paymentStatus !== 'authorized') {
+      return res.status(400).json({ 
+        error: 'Payment not successful', 
+        status: paymentStatus 
+      });
+    }
+
+    // ===== STEP 4: Update transaction if still pending =====
+    const now = new Date();
+    let subscriptionEndTime: Date;
+
+    if (transaction.plan_type === 'daily') {
+      subscriptionEndTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    } else {
+      subscriptionEndTime = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    }
+
+    // Update transaction
+    await supabase
+      .from('payment_transactions')
+      .update({
+        status: 'success',
+        razorpay_payment_id: paymentId,
+        razorpay_signature: signature,
+        payment_timestamp: now.toISOString(),
+        updated_at: now.toISOString()
+      })
+      .eq('id', transaction.id)
+      .eq('status', 'pending');
+
+    // ===== STEP 5: Update user subscription =====
+    const { data: userData } = await supabase
+      .from('users')
+      .select('subscription_tier')
+      .eq('id', transaction.user_id)
+      .single();
+
+    const oldTier = userData?.subscription_tier || 'free';
+
+    await supabase
+      .from('users')
+      .update({
+        subscription_tier: transaction.plan_type,
+        subscription_start_time: now.toISOString(),
+        subscription_end_time: subscriptionEndTime.toISOString(),
+        updated_at: now.toISOString()
+      })
+      .eq('id', transaction.user_id);
+
+    // ===== STEP 6: Log to subscription history =====
+    await supabase
+      .from('subscription_history')
+      .insert({
+        user_id: transaction.user_id,
+        old_tier: oldTier,
+        new_tier: transaction.plan_type,
+        reason: 'payment_success',
+        transaction_id: transaction.id
+      });
+
+    console.log(`[Payment Verify] ✅ SUCCESS: User ${transaction.user_id} upgraded to ${transaction.plan_type}`);
+
+    return res.json({
+      success: true,
+      orderId,
+      paymentId,
+      planType: transaction.plan_type,
+      endDate: subscriptionEndTime.toISOString(),
+      message: 'Payment verified successfully! You are now a premium user.'
+    });
+
+  } catch (error: any) {
+    console.error('[Payment Verify] Error:', error);
+    return res.status(500).json({ 
+      error: 'Failed to verify payment', 
+      details: error.message 
     });
   }
 });
@@ -452,5 +521,23 @@ router.get('/api/user/subscription', async (req: Request, res: Response) => {
   }
 });
 
-export default router;
+// =====================================================
+// GET /api/payment/config
+// Get payment configuration for frontend
+// =====================================================
+router.get('/api/payment/config', async (_req: Request, res: Response) => {
+  try {
+    const config = getRazorpayPlanConfig();
+    res.json({
+      paymentProvider: 'razorpay',
+      currency: config.currency,
+      plans: config.plans,
+      keyId: process.env.RAZORPAY_KEY_ID // Frontend needs this
+    });
+  } catch (error: any) {
+    console.error('[Payment Config] Error:', error);
+    res.status(500).json({ error: 'Failed to get payment config' });
+  }
+});
 
+export default router;

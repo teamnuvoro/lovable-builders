@@ -195,6 +195,11 @@ DROP POLICY IF EXISTS "Users can view own message logs" ON message_logs;
 CREATE POLICY "Users can view own message logs" ON message_logs
   FOR SELECT USING (auth.uid() = user_id);
 
+-- Service role can read message logs (for quota checking)
+DROP POLICY IF EXISTS "Service role can read message logs" ON message_logs;
+CREATE POLICY "Service role can read message logs" ON message_logs
+  FOR SELECT USING (true);
+
 -- Service role can insert message logs (for backend)
 DROP POLICY IF EXISTS "Service role can insert message logs" ON message_logs;
 CREATE POLICY "Service role can insert message logs" ON message_logs

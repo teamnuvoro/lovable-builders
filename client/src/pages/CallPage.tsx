@@ -138,7 +138,19 @@ export default function CallPage() {
 
         vapiRef.current.on('speech-end', () => {
           setCallStatus('listening');
-          setStatusText('Listening...');
+          setStatusText('Listening... Speak now!');
+        });
+
+        // CRITICAL: Listen for function calls to detect when AI is processing
+        vapiRef.current.on('function-call', () => {
+          setStatusText('Processing...');
+        });
+
+        // Listen for message updates to show real-time response
+        vapiRef.current.on('message', (message: any) => {
+          if (message.type === 'conversation-item-create' || message.type === 'conversation-item-update') {
+            setStatusText('Riya is responding...');
+          }
         });
 
         vapiRef.current.on('volume-level', (volume: number) => {
@@ -300,24 +312,49 @@ export default function CallPage() {
       setStatusText('Starting conversation...');
       analytics.track("voice_call_started");
 
-      // CRITICAL FIX FOR MOBILE SAFARI:
+      // OPTIMIZED FOR INSTANT RESPONSES - ZERO LATENCY
       // Start Vapi IMMEDIATELY on user click.
       const vapiStartPromise = vapiRef.current.start({
         model: {
           provider: "openai",
-          model: "gpt-4o-mini",
+          model: "gpt-4o-mini", // Fastest OpenAI model
           messages: [
             {
               role: "system",
               content: AI_ASSISTANTS.Riya.systemPrompt
             }
           ],
+          // CRITICAL: Optimize for instant responses
+          maxTokens: 80, // Very short responses = faster generation
+          temperature: 0.8, // Slightly higher for naturalness but still fast
+          topP: 0.9,
+          frequencyPenalty: 0.3,
+          presencePenalty: 0.3,
         },
         voice: {
           provider: "11labs",
           voiceId: "21m00Tcm4TlvDq8ikWAM", // Standard Voice (Rachel) to fix audio
+          stability: 0.5, // Faster voice generation
+          similarityBoost: 0.75,
         },
-        firstMessage: "Hey baby! Kaisi ho tum? I missed talking to you. Aaj kya chal raha hai?"
+        // Remove firstMessage delay - let user speak first for instant response
+        // firstMessage: "Hey baby! Kaisi ho tum? I missed talking to you. Aaj kya chal raha hai?",
+        
+        // CRITICAL: Zero delay settings for instant responses
+        responseDelay: 0, // No artificial delay
+        silenceTimeout: 500, // Detect silence quickly (500ms)
+        maxDurationSeconds: 600, // Long call support
+        
+        // Enable real-time streaming
+        serverUrl: undefined, // Use default (fastest region)
+        
+        // Optimize transcription for speed
+        transcriber: {
+          provider: "deepgram",
+          model: "nova-2", // Fastest Deepgram model
+          language: "en",
+          keywords: ["baby", "jaan", "theek", "acha"], // Help with Hinglish
+        },
       });
 
       // Start backend tracking in background

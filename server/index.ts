@@ -16,6 +16,8 @@ import paymentsRebuildRoutes from "./routes/payments-rebuild";
 import transcribeRoutes from "./routes/deepgram-transcribe";
 import messagesHistoryRoutes from "./routes/messages-history";
 import analyticsRoutes from "./routes/analytics-events";
+import reminderRoutes from "./routes/reminders";
+import { initializeReminderScheduler } from "./jobs/reminder-scheduler";
 
 const app = express();
 
@@ -110,6 +112,9 @@ app.use(messagesHistoryRoutes);
 // Analytics routes
 app.use(analyticsRoutes);
 
+// Reminder routes (WhatsApp notifications)
+app.use(reminderRoutes);
+
 // Update user personality endpoint
 app.patch("/api/user/personality", async (req, res) => {
   try {
@@ -162,6 +167,9 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
       console.log(`[Server] ✅ Frontend server listening on port ${port}`);
       console.log(`[Server] 🔄 Supabase API routes integrated`);
       console.log(`[Server] 🔄 Chat API routes integrated`);
+      
+      // Initialize reminder scheduler
+      initializeReminderScheduler();
     });
   })();
 }

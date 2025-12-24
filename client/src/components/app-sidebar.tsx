@@ -16,7 +16,6 @@ import {
   BarChart3,
   Settings,
   Heart,
-  Image,
   History,
   LogOut,
 } from "lucide-react";
@@ -31,7 +30,6 @@ const mainItems = [
 const secondaryItems = [
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Memories", url: "/memories", icon: Heart },
-  { title: "Gallery", url: "/gallery", icon: Image },
   { title: "History", url: "/history", icon: History },
   { title: "Settings", url: "/settings", icon: Settings },
 ];

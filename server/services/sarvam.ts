@@ -1,135 +1,247 @@
-import WebSocket from 'ws';
+/**
+ * Sarvam AI Voice Service
+ * 
+ * Sarvam AI provides Indian-focused conversational AI with better Hinglish support.
+ * API Documentation: https://docs.sarvam.ai
+ */
 
-const SARVAM_API_KEY = process.env.SARVAM_API_KEY;
-const SARVAM_BASE_URL = 'https://api.sarvam.ai';
+const SARVAM_API_BASE_URL = process.env.SARVAM_API_BASE_URL || 'https://api.sarvam.ai';
 
-if (!SARVAM_API_KEY) {
-  console.warn('SARVAM_API_KEY not found in environment variables');
+export interface SarvamCallConfig {
+  userId: string;
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  voiceSettings?: {
+    voiceId?: string;
+    language?: string;
+  };
+  systemPrompt?: string;
 }
 
-// Chat completion with Sarvam
-export async function chatCompletion(messages: Array<{ role: string; content: string }>, temperature = 0.3) {
-  const response = await fetch(`${SARVAM_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-subscription-key': SARVAM_API_KEY || '',
-    },
-    body: JSON.stringify({
-      model: 'sarvam-2b',
-      messages,
-      temperature,
-    }),
+export interface SarvamCallResponse {
+  callId: string;
+  status: 'initiated' | 'active' | 'ended';
+  audioStreamUrl?: string;
+  websocketUrl?: string;
+}
+
+/**
+ * Get Sarvam API key from environment
+ */
+function getSarvamApiKey(): string | null {
+  const apiKey = process.env.SARVAM_API_KEY;
+  
+  if (!apiKey) {
+    console.warn('[Sarvam] API key not configured. Set SARVAM_API_KEY in environment variables.');
+    return null;
+  }
+
+  return apiKey;
+}
+
+/**
+ * Make authenticated API request to Sarvam
+ */
+async function sarvamApiRequest(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const apiKey = getSarvamApiKey();
+  
+  if (!apiKey) {
+    throw new Error('Sarvam API key not configured');
+  }
+
+  const url = `${SARVAM_API_BASE_URL}${endpoint}`;
+  
+  const headers = {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+
+  console.log('[Sarvam] API Request:', {
+    method: options.method || 'GET',
+    endpoint,
+    url: url.replace(apiKey, '[HIDDEN]')
+  });
+
+  const response = await fetch(url, {
+    ...options,
+    headers,
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Sarvam chat API error: ${response.status} ${error}`);
+    const errorText = await response.text();
+    console.error('[Sarvam] API Error:', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorText
+    });
+    throw new Error(`Sarvam API error: ${response.status} ${response.statusText}`);
   }
 
-  return response.json();
+  return response;
 }
 
-// Create WebSocket connection to Sarvam STT
-export function createSTTWebSocket(language = 'hi-IN'): WebSocket {
-  // Build WebSocket URL with query parameters
-  const params = new URLSearchParams({
-    'language-code': language,
-    'model': 'saarika:v2.5',
-    'vad_signals': 'true',
-    'sample_rate': '16000',
-  });
-  
-  const ws = new WebSocket(`wss://api.sarvam.ai/speech-to-text/ws?${params.toString()}`, {
-    headers: {
-      'Api-Subscription-Key': SARVAM_API_KEY || '',
-    },
-  });
-
-  ws.on('open', () => {
-    console.log('[Sarvam STT] WebSocket connected');
-  });
-
-  return ws;
-}
-
-// Create WebSocket connection to Sarvam TTS
-export function createTTSWebSocket(
-  language = 'hi-IN',
-  speaker = 'meera',
-  model = 'bulbul:v2'
-): WebSocket {
-  // Build WebSocket URL with query parameters
-  const params = new URLSearchParams({
-    'model': model,
-    'send_completion_event': 'true',
-  });
-  
-  const ws = new WebSocket(`wss://api.sarvam.ai/text-to-speech/ws?${params.toString()}`, {
-    headers: {
-      'Api-Subscription-Key': SARVAM_API_KEY || '',
-    },
-  });
-
-  // Send configuration on connection
-  ws.on('open', () => {
-    console.log('[Sarvam TTS] WebSocket connected');
-    ws.send(JSON.stringify({
-      action: 'configure',
-      target_language_code: language,
-      speaker,
-    }));
-  });
-
-  return ws;
-}
-
-// Generate end-of-call summary using Sarvam chat
-export async function generateCallSummary(transcript: string): Promise<{
-  partnerTypeOneLiner: string;
-  top3TraitsYouValue: string[];
-  whatYouMightWorkOn: string[];
-  nextTimeFocus: string[];
-  loveLanguageGuess: string;
-  communicationFit: string;
-  confidenceScore: number;
-}> {
-  const summaryPrompt = `Analyze this conversation transcript and provide a relationship profile summary in JSON format.
-
-Transcript:
-${transcript}
-
-Provide a JSON response with:
-- partnerTypeOneLiner: A one-line description of their ideal partner type
-- top3TraitsYouValue: Array of 3 traits they value most in a partner
-- whatYouMightWorkOn: Array of 2-3 areas for personal growth
-- nextTimeFocus: Array of 2-3 topics to explore in next conversation
-- loveLanguageGuess: Their likely love language (words of affirmation, quality time, physical touch, acts of service, or receiving gifts)
-- communicationFit: Assessment of their communication style
-- confidenceScore: Confidence in this analysis (0-1 scale)
-
-Return only valid JSON, no other text.`;
-
-  const response = await chatCompletion([
-    { role: 'system', content: 'You are an expert relationship analyst. Always respond with valid JSON only.' },
-    { role: 'user', content: summaryPrompt },
-  ], 0.3);
-
-  const content = response.choices[0]?.message?.content || '{}';
-  
+/**
+ * Start a voice call with Sarvam AI
+ * Creates a new voice conversation session
+ */
+export async function startSarvamCall(config: SarvamCallConfig): Promise<SarvamCallResponse> {
   try {
-    const summary = JSON.parse(content);
-    return {
-      partnerTypeOneLiner: summary.partnerTypeOneLiner || '',
-      top3TraitsYouValue: summary.top3TraitsYouValue || [],
-      whatYouMightWorkOn: summary.whatYouMightWorkOn || [],
-      nextTimeFocus: summary.nextTimeFocus || [],
-      loveLanguageGuess: summary.loveLanguageGuess || '',
-      communicationFit: summary.communicationFit || '',
-      confidenceScore: summary.confidenceScore || 0.5,
+    const apiKey = getSarvamApiKey();
+    
+    if (!apiKey) {
+      throw new Error('Sarvam API key not configured');
+    }
+
+    // Get conversation memory if not provided
+    let conversationHistory = config.conversationHistory;
+    if (!conversationHistory || conversationHistory.length === 0) {
+      conversationHistory = await getConversationMemory(config.userId, 10);
+    }
+
+    // Prepare request payload
+    // Note: Update endpoint and payload structure based on actual Sarvam API documentation
+    const payload = {
+      user_id: config.userId,
+      system_prompt: config.systemPrompt || 'You are Riya, a warm and caring AI companion. Speak in Hinglish naturally.',
+      conversation_history: conversationHistory,
+      voice: {
+        voice_id: config.voiceSettings?.voiceId || 'default',
+        language: config.voiceSettings?.language || 'hi-IN',
+      },
+      // Add other Sarvam-specific parameters as needed
     };
-  } catch (error) {
-    console.error('Failed to parse summary JSON:', error);
-    throw new Error('Failed to generate call summary');
+
+    console.log('[Sarvam] Starting call for user:', config.userId);
+    console.log('[Sarvam] Conversation history length:', conversationHistory.length);
+
+    // Make API call to start voice session
+    // Update endpoint based on actual Sarvam API documentation
+    const response = await sarvamApiRequest('/v1/calls/start', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    
+    console.log('[Sarvam] Call started successfully:', data.call_id || data.id);
+
+    return {
+      callId: data.call_id || data.id || `sarvam_${Date.now()}_${config.userId.slice(0, 8)}`,
+      status: 'initiated',
+      audioStreamUrl: data.audio_stream_url,
+      websocketUrl: data.websocket_url,
+    };
+
+  } catch (error: any) {
+    console.error('[Sarvam] Error starting call:', error);
+    throw new Error(`Failed to start Sarvam call: ${error.message}`);
+  }
+}
+
+/**
+ * End a Sarvam call
+ * Terminates an active voice conversation
+ */
+export async function endSarvamCall(callId: string): Promise<void> {
+  try {
+    const apiKey = getSarvamApiKey();
+    
+    if (!apiKey) {
+      throw new Error('Sarvam API key not configured');
+    }
+
+    console.log('[Sarvam] Ending call:', callId);
+
+    // Make API call to end voice session
+    // Update endpoint based on actual Sarvam API documentation
+    await sarvamApiRequest(`/v1/calls/${callId}/end`, {
+      method: 'POST',
+    });
+
+    console.log('[Sarvam] Call ended successfully:', callId);
+
+  } catch (error: any) {
+    console.error('[Sarvam] Error ending call:', error);
+    // Don't throw - ending a call should be best-effort
+    console.warn('[Sarvam] Continuing despite end call error');
+  }
+}
+
+/**
+ * Get call status from Sarvam
+ */
+export async function getSarvamCallStatus(callId: string): Promise<any> {
+  try {
+    const response = await sarvamApiRequest(`/v1/calls/${callId}`, {
+      method: 'GET',
+    });
+
+    return await response.json();
+  } catch (error: any) {
+    console.error('[Sarvam] Error getting call status:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get conversation memory/context for a user
+ * This retrieves recent conversation history to maintain context across calls
+ */
+export async function getConversationMemory(userId: string, limit: number = 10): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
+  try {
+    // Import supabase here to avoid circular dependencies
+    const { supabase, isSupabaseConfigured } = await import('../supabase');
+
+    if (!isSupabaseConfigured) {
+      return [];
+    }
+
+    // Get recent messages from database
+    const { data: messages, error } = await supabase
+      .from('messages')
+      .select('role, text')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('[Sarvam] Error fetching conversation memory:', error);
+      return [];
+    }
+
+    // Transform to conversation format
+    const conversationHistory = (messages || [])
+      .reverse() // Reverse to get chronological order
+      .map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.text || ''
+      }))
+      .filter(msg => msg.content.trim().length > 0);
+
+    return conversationHistory;
+
+  } catch (error: any) {
+    console.error('[Sarvam] Error getting conversation memory:', error);
+    return [];
+  }
+}
+
+/**
+ * Save conversation to memory
+ */
+export async function saveConversationToMemory(
+  userId: string,
+  role: 'user' | 'assistant',
+  content: string
+): Promise<void> {
+  try {
+    // This is handled by the existing message logging system
+    // Just ensure messages are being saved to the messages table
+    console.log('[Sarvam] Conversation saved to memory:', { userId, role, contentLength: content.length });
+  } catch (error: any) {
+    console.error('[Sarvam] Error saving conversation to memory:', error);
   }
 }

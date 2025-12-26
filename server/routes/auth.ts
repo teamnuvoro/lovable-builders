@@ -435,5 +435,134 @@ router.post('/api/auth/logout', async (req: Request, res: Response) => {
     }
 });
 
+// ============================================
+// 🔓 BACKDOOR LOGIN - FOR TESTING ONLY
+// ============================================
+// POST /api/auth/backdoor-login - Direct login with phone + password (testing only)
+router.post('/api/auth/backdoor-login', async (req: Request, res: Response) => {
+    try {
+        const { phoneNumber, password } = req.body;
+
+        // Backdoor credentials
+        const BACKDOOR_PHONE = '8828447880';
+        const BACKDOOR_PASSWORD = '0000';
+
+        // Clean phone number (remove spaces, handle with/without country code)
+        const cleanPhone = phoneNumber?.replace(/\s+/g, '').replace(/^\+91/, '').replace(/^91/, '');
+        const cleanBackdoorPhone = BACKDOOR_PHONE.replace(/\s+/g, '');
+
+        // Verify backdoor credentials
+        if (cleanPhone !== cleanBackdoorPhone || password !== BACKDOOR_PASSWORD) {
+            console.log('[BACKDOOR] Invalid credentials attempted:', { phone: cleanPhone, password: password ? '***' : 'missing' });
+            return res.status(401).json({ 
+                error: 'Invalid credentials',
+                message: 'Backdoor access denied'
+            });
+        }
+
+        console.log('[BACKDOOR] ✅ Backdoor login attempt for phone:', cleanPhone);
+
+        // Get user from database
+        if (!isSupabaseConfigured) {
+            return res.status(500).json({
+                error: 'Database not configured. Please set up Supabase.'
+            });
+        }
+
+        // Try to find user with this phone number (with or without country code)
+        let { data: user, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .or(`phone_number.eq.${cleanPhone},phone_number.eq.+91${cleanPhone},phone_number.eq.91${cleanPhone}`)
+            .single();
+
+        // If user doesn't exist, create it automatically for backdoor access
+        if (userError || !user) {
+            console.log('[BACKDOOR] User not found, creating backdoor user automatically...');
+            
+            const oneYearFromNow = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+            const backdoorPhone = `+91${cleanPhone}`;
+            
+            const { data: newUser, error: createError } = await supabase
+                .from('users')
+                .insert({
+                    name: 'Backdoor Test User',
+                    email: `backdoor-${cleanPhone}@test.com`,
+                    phone_number: backdoorPhone,
+                    gender: 'prefer_not_to_say',
+                    persona: 'sweet_supportive', // Default to Riya
+                    premium_user: true, // Backdoor users get premium
+                    subscription_plan: 'daily',
+                    subscription_expiry: oneYearFromNow,
+                    subscription_tier: 'daily',
+                    subscription_start_time: new Date().toISOString(),
+                    subscription_end_time: oneYearFromNow,
+                    locale: 'hi-IN',
+                    onboarding_complete: true,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                })
+                .select()
+                .single();
+
+            if (createError) {
+                console.error('[BACKDOOR] Error creating user:', createError);
+                return res.status(500).json({ 
+                    error: 'Failed to create backdoor user',
+                    details: createError.message
+                });
+            }
+
+            user = newUser;
+            console.log('[BACKDOOR] ✅ Created new backdoor user:', user.id, user.name);
+
+            // Initialize usage stats for new user
+            await supabase
+                .from('usage_stats')
+                .insert({
+                    user_id: user.id,
+                    total_messages: 0,
+                    total_call_seconds: 0,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                });
+        } else {
+            console.log('[BACKDOOR] ✅ User found:', user.id, user.name);
+        }
+
+        // Create session
+        const sessionToken = Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
+
+        // Update last login time
+        await supabase
+            .from('users')
+            .update({ 
+                last_login_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', user.id);
+
+        res.json({
+            success: true,
+            message: 'Backdoor login successful',
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                phoneNumber: user.phone_number,
+                premiumUser: user.premium_user,
+                onboardingComplete: user.onboarding_complete,
+                persona: user.persona
+            },
+            sessionToken,
+            isBackdoor: true
+        });
+
+    } catch (error: any) {
+        console.error('[BACKDOOR] Error:', error);
+        res.status(500).json({ error: 'Backdoor login failed', details: error.message });
+    }
+});
+
 export default router;
 

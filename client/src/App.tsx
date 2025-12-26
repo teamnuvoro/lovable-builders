@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { TopNavbar } from "@/components/TopNavbar";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { initAmplitude } from "@/utils/amplitudeTracking";
+import { BackdoorActivator } from "@/components/BackdoorActivator";
 import ChatPage from "@/pages/ChatPage";
 import CallPage from "@/pages/CallPage";
 import SummaryPage from "@/pages/SummaryPage";
@@ -79,6 +80,16 @@ function Router() {
       {/* ----------------------------------------------------------------- */}
       <Route path="/">
         {() => {
+          // 🔓 Frontend Backdoor Check
+          const backdoorActive = typeof window !== 'undefined' && 
+              (localStorage.getItem('backdoor_enabled') === 'true' || 
+               sessionStorage.getItem('backdoor_enabled') === 'true' ||
+               new URLSearchParams(window.location.search).get('backdoor') === 'true');
+
+          if (backdoorActive) {
+            return <Redirect to="/chat" />;
+          }
+
           const { isLoading } = useAuth();
           if (isLoading) return <div className="flex h-screen w-full items-center justify-center bg-pink-50"></div>;
 
@@ -187,6 +198,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <TooltipProvider>
+          <BackdoorActivator />
           <Router />
           <Toaster />
         </TooltipProvider>

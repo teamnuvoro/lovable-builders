@@ -5,6 +5,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Loader2, Sparkles, ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
+import { apiRequest } from "@/lib/queryClient";
+import { useMutation } from "@tanstack/react-query";
+import { enableBackdoor } from "@/components/BackdoorActivator";
 
 export default function LoginPageSimple() {
   const [, setLocation] = useLocation();
@@ -18,9 +21,68 @@ export default function LoginPageSimple() {
   const [loading, setLoading] = useState(false);
   const [userName, setUserName] = useState("");
   const [devModeOTP, setDevModeOTP] = useState("");
+  const [backdoorPassword, setBackdoorPassword] = useState("");
+
+  // Check if entered phone is backdoor number
+  const isBackdoorPhone = (phoneNum: string) => {
+    const clean = phoneNum.replace(/\s+/g, '').replace(/^\+91/, '').replace(/^91/, '');
+    return clean === '8828447880';
+  };
+
+  // Backdoor Login Mutation (Backend API)
+  const backdoorLoginMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/auth/backdoor-login", {
+        phoneNumber: phone,
+        password: backdoorPassword
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      // Store session token
+      if (data.sessionToken) {
+        localStorage.setItem('sessionToken', data.sessionToken);
+      }
+
+      // Update Auth Context
+      login(data.user);
+
+      toast({
+        title: "🔓 Backdoor Access Granted!",
+        description: `Hi ${data.user.name}! Logged in via backdoor.`,
+      });
+
+      // Redirect to chat
+      setTimeout(() => setLocation('/chat'), 1500);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Backdoor Login Failed",
+        description: error.response?.data?.error || error.message || "Invalid credentials.",
+        variant: "destructive",
+      });
+    },
+  });
 
   // STEP 1: Send Login OTP
   const handleSendOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Check if this is backdoor phone number
+    if (isBackdoorPhone(phone)) {
+      // If password is entered, trigger backdoor login
+      if (backdoorPassword) {
+        backdoorLoginMutation.mutate();
+        return;
+      } else {
+        // Show password field (it will appear below)
+        toast({
+          title: "Backdoor Access",
+          description: "Enter password to continue",
+        });
+        return;
+      }
+    }
     e.preventDefault();
 
     if (!phone) {
@@ -155,20 +217,98 @@ export default function LoginPageSimple() {
                 <p className="text-xs text-gray-500 mt-1">We'll send verification code</p>
               </div>
 
+              {/* Backdoor Password Field - Only shown for backdoor phone */}
+              {isBackdoorPhone(phone) && (
+                <div className="space-y-2">
+                  <label className="block text-gray-700 font-medium">Backdoor Password</label>
+                  <input
+                    type="password"
+                    value={backdoorPassword}
+                    onChange={(e) => setBackdoorPassword(e.target.value)}
+                    placeholder="Enter backdoor password"
+                    className="w-full h-14 px-4 rounded-xl border-2 border-gray-200 focus:border-purple-400 focus:outline-none text-base"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && backdoorPassword) {
+                        backdoorLoginMutation.mutate();
+                      }
+                    }}
+                  />
+                  <p className="text-xs text-yellow-600 font-medium">🔓 Backdoor access mode</p>
+                </div>
+              )}
+
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || backdoorLoginMutation.isPending}
                 className="w-full h-16 text-lg font-semibold rounded-full bg-[#9810fa] hover:bg-purple-700 text-white shadow-lg disabled:opacity-50"
               >
-                {loading ? (
+                {backdoorLoginMutation.isPending ? (
+                  <>
+                    <Loader2 className="inline-block w-5 h-5 mr-2 animate-spin" />
+                    Authenticating...
+                  </>
+                ) : loading ? (
                   <>
                     <Loader2 className="inline-block w-5 h-5 mr-2 animate-spin" />
                     Sending...
                   </>
+                ) : isBackdoorPhone(phone) ? (
+                  "Backdoor Login"
                 ) : (
                   "Send Verification Code"
                 )}
               </button>
+
+              {/* Backdoor Buttons */}
+              <div className="space-y-3 mt-4 pt-4 border-t border-gray-200">
+                {/* Backend Backdoor Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhone('8828447880');
+                    setBackdoorPassword('0000');
+                    setTimeout(() => {
+                      backdoorLoginMutation.mutate();
+                    }, 100);
+                  }}
+                  disabled={backdoorLoginMutation.isPending}
+                  className="w-full h-12 text-sm font-medium rounded-full border-2 border-gray-300 hover:border-purple-400 hover:bg-purple-50 text-gray-700 hover:text-purple-700 transition-all duration-300 shadow-sm disabled:opacity-50"
+                >
+                  {backdoorLoginMutation.isPending ? (
+                    <>
+                      <Loader2 className="inline-block w-4 h-4 mr-2 animate-spin" />
+                      Authenticating...
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-lg mr-2">🔒</span>
+                      Backend Backdoor (Phone: 8828447880)
+                    </>
+                  )}
+                </button>
+
+                {/* Frontend Backdoor Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    enableBackdoor();
+                    toast({
+                      title: "🔓 Frontend Backdoor Enabled!",
+                      description: "Redirecting to chat...",
+                    });
+                    setTimeout(() => {
+                      window.location.href = '/chat';
+                    }, 1500);
+                  }}
+                  className="w-full h-12 text-sm font-medium rounded-full border-2 border-green-300 hover:border-green-500 hover:bg-green-50 text-gray-700 hover:text-green-700 transition-all duration-300 shadow-sm"
+                >
+                  <span className="text-lg mr-2">🚪</span>
+                  Frontend Backdoor (No Auth Required)
+                </button>
+                <p className="text-xs text-gray-400 text-center mt-2">
+                  Quick access for testing • Press Ctrl+Shift+B to toggle frontend backdoor
+                </p>
+              </div>
             </form>
           ) : (
             // STEP 2: OTP Verification

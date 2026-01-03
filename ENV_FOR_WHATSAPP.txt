@@ -1,0 +1,62 @@
+🔐 RIYA AI - COMPLETE ENV VARIABLES
+
+Copy this entire block and paste into .env file:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# SUPABASE (REQUIRED)
+SUPABASE_URL=https://xgraxcgavqeyqfwimbwt.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhncmF4Y2dhdnFleXFmd2ltYnd0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NDA1OTQ5MiwiZXhwIjoyMDc5NjM1NDkyfQ.ShwqPDkgrvXDu9k-4UT6arJMqOC1hAG_FJTcCc6DYnA
+VITE_SUPABASE_URL=https://xgraxcgavqeyqfwimbwt.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhncmF4Y2dhdnFleXFmd2ltYnd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQwNTk0OTIsImV4cCI6MjA3OTYzNTQ5Mn0.EMxU0ZijosNwDErWjrZQM63NUTYZaNiimGyTiSF9Gs0
+
+# AI CHAT - GROQ (REQUIRED)
+GROQ_API_KEY=your_groq_api_key_here
+
+# PAYMENTS - RAZORPAY (Version 2)
+RAZORPAY_KEY_ID=rzp_live_RuEfl0uaD8zzHw
+RAZORPAY_KEY_SECRET=UKXIeykIOqAk6atQCmqi6EwS
+VITE_RAZORPAY_KEY_ID=rzp_live_RuEfl0uaD8zzHw
+
+# VOICE - SARVAM AI (Version 2)
+SARVAM_API_KEY=sk_av2udgsa_X5NpkUJUYPLwoNJmpb9s5AA9
+VITE_SARVAM_API_KEY=sk_av2udgsa_X5NpkUJUYPLwoNJmpb9s5AA9
+
+# WHATSAPP REMINDERS (Version 2)
+ENABLE_REMINDERS=true
+
+# SMS/OTP - TWILIO (Required for Login)
+# Get from: https://console.twilio.com
+TWILIO_ACCOUNT_SID=your_twilio_sid_here
+TWILIO_AUTH_TOKEN=your_twilio_token_here
+TWILIO_PHONE_NUMBER=+1234567890
+
+# SERVER CONFIG
+NODE_ENV=development
+PORT=3000
+VITE_API_URL=http://localhost:3000
+
+# OPTIONAL - NGROK (for local HTTPS testing)
+NGROK_URL=https://prosurgical-nia-carpingly.ngrok-free.dev
+VITE_NGROK_URL=https://prosurgical-nia-carpingly.ngrok-free.dev
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ READY TO USE:
+- Supabase ✅
+- Groq ✅
+- Razorpay ✅
+- Sarvam AI ✅
+
+⚠️ NEED TO ADD:
+- Twilio (for SMS/OTP login)
+
+📝 INSTRUCTIONS:
+1. Create .env file in project root
+2. Paste all variables above
+3. Add your Twilio credentials
+4. Run: npm install
+5. Run: npm run dev:all
+
+
+

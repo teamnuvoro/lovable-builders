@@ -79,5 +79,3 @@ WHERE image_url IS NOT NULL;
 SELECT '✅ Chat images feature migrations completed!' as status;
 
 
-
-

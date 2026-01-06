@@ -46,5 +46,3 @@ WHERE persona_id IS NULL
 SELECT '✅ Persona ID column added to messages table!' as status;
 
 
-
-

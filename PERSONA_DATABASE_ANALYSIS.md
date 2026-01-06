@@ -285,5 +285,3 @@ With `persona_id` on messages, you can:
 The new system is **code-driven** (personas live in TypeScript files) but **database-tracked** (which persona was used per message). The database tracks usage, but the persona definitions themselves are in the codebase, making them easier to version control and update.
 
 
-
-

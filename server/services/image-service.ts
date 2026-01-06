@@ -221,5 +221,3 @@ export async function getImageCount(activeOnly: boolean = true): Promise<number>
 }
 
 
-
-

@@ -826,7 +826,7 @@ router.post("/api/chat", async (req: Request, res: Response) => {
 
     // Build image context string if image is being sent
     const imageContext = selectedImage 
-      ? `\n\nIMPORTANT: The user has requested a photo/image. You are sending them a photo with this message. The image URL is: ${selectedImage.image_url}. Naturally mention that you're sending them a photo in your response. Be warm and playful about it. Example: "Here's a photo for you! 📸" or "Yeh lo, maine tumhare liye ek photo bheji hai! 💕"`
+      ? `\n\nIMPORTANT: The user has requested a photo/image. You are sending them a photo with this message. The image will be displayed automatically - DO NOT include the image URL or any links in your response text. Just naturally mention that you're sending them a photo in your response. Be warm and playful about it. Example: "Here's a photo for you! 📸" or "Yeh lo, maine tumhare liye ek photo bheji hai! 💕" - but do NOT include any URLs or links.`
       : undefined;
 
     // Run safety layer check BEFORE calling Groq

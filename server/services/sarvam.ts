@@ -97,7 +97,7 @@ async function sarvamApiRequest(
   
   const headers = {
     'Authorization': `Bearer ${apiKey}`,
-    'Content-Type': 'application/json',
+      'Content-Type': 'application/json',
     ...options.headers,
   };
 

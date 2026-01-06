@@ -19,5 +19,3 @@ WHERE image_url IS NOT NULL;
 SELECT '✅ Image URL support added to messages table!' as status;
 
 
-
-

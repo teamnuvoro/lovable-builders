@@ -28,7 +28,18 @@ RAZORPAY_KEY_SECRET=UKXIeykIOqAk6atQCmqi6EwS
 VITE_RAZORPAY_KEY_ID=rzp_live_RuEfl0uaD8zzHw
 
 # ============================================
-# VOICE - SARVAM AI (Version 2)
+# VOICE - BOLNA AI (Version 2 - Primary)
+# ============================================
+BOLNA_API_KEY=your_bolna_api_key_here
+BOLNA_AGENT_ID=your_bolna_agent_id_here
+BOLNA_API_URL=https://api.bolna.ai/v1
+VITE_BOLNA_API_KEY=your_bolna_api_key_here
+VITE_BOLNA_AGENT_ID=your_bolna_agent_id_here
+VITE_BOLNA_API_URL=https://api.bolna.ai/v1
+VITE_BOLNA_WS_URL=wss://api.bolna.ai/ws
+
+# ============================================
+# VOICE - SARVAM AI (Version 2 - Fallback)
 # ============================================
 SARVAM_API_KEY=sk_av2udgsa_X5NpkUJUYPLwoNJmpb9s5AA9
 VITE_SARVAM_API_KEY=sk_av2udgsa_X5NpkUJUYPLwoNJmpb9s5AA9
@@ -92,7 +103,13 @@ PAYMENTS (Razorpay):
 - RAZORPAY_KEY_SECRET: UKXIeykIOqAk6atQCmqi6EwS
 - VITE_RAZORPAY_KEY_ID: rzp_live_RuEfl0uaD8zzHw
 
-VOICE (Sarvam AI):
+VOICE (Bolna AI - Primary):
+- BOLNA_API_KEY: your_bolna_api_key_here
+- BOLNA_AGENT_ID: your_bolna_agent_id_here
+- VITE_BOLNA_API_KEY: your_bolna_api_key_here
+- VITE_BOLNA_AGENT_ID: your_bolna_agent_id_here
+
+VOICE (Sarvam AI - Fallback):
 - SARVAM_API_KEY: sk_av2udgsa_X5NpkUJUYPLwoNJmpb9s5AA9
 - VITE_SARVAM_API_KEY: sk_av2udgsa_X5NpkUJUYPLwoNJmpb9s5AA9
 
@@ -133,8 +150,12 @@ Get Twilio keys from: https://console.twilio.com
 **Razorpay:**
 - Already provided above (live keys)
 
+**Bolna AI:**
+- Get API key and Agent ID from: https://platform.bolna.ai/dashboard
+- Create an agent in Bolna dashboard and copy the Agent ID
+
 **Sarvam AI:**
-- Already provided above (API key)
+- Already provided above (API key - fallback option)
 
 ---
 
@@ -155,7 +176,5 @@ Get Twilio keys from: https://console.twilio.com
 3. Paste and replace placeholder values
 4. Run: `npm install`
 5. Run: `npm run dev:all`
-
-
 
 

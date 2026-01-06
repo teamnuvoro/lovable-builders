@@ -62,5 +62,3 @@ GRANT SELECT ON chat_images TO authenticated;
 SELECT '✅ Chat images table created!' as status;
 
 
-
-

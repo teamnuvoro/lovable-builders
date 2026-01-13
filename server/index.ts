@@ -252,7 +252,7 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
               target_language_code: languageValue,
               pitch: 0.8,
               pace: 1.0,
-              min_buffer_size: 50,
+              min_buffer_size: 10,
               max_chunk_length: 200,
               output_audio_codec: "mp3",
               output_audio_bitrate: "128k"
@@ -323,6 +323,12 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
             // Passing a string automatically sends as Text Frame
             sarvamWs.send(textJson);
             console.log(`[Sarvam Proxy] ✅ Text message sent as TEXT FRAME`);
+
+            // 2. Send Flush (Force it to speak)
+            // Immediately following the text sending to force generation
+            const flushMessage = JSON.stringify({ type: "flush" });
+            sarvamWs.send(flushMessage);
+            console.log(`[Sarvam Proxy] 🚽 Flush command sent`);
 
             if (text === 'Hello! I am Riya. How are you today?') {
               ttsTextSent = true; // Mark greeting as sent

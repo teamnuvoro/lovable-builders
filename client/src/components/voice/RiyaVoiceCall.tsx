@@ -2,14 +2,19 @@
 import { useState, useEffect } from 'react';
 import Vapi from '@vapi-ai/web';
 import { Button } from '@/components/ui/button';
-import { Phone, PhoneOff, Mic, MicOff, Loader2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Phone, PhoneOff, Mic, MicOff, Loader2, Settings } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 // Initialize Vapi SDK
-// Ideally, getting this from env vars
-const VAPI_PUBLIC_KEY = import.meta.env.VITE_VAPI_PUBLIC_KEY || 'YOUR_VAPI_PUBLIC_KEY';
-const VAPI_ASSISTANT_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID || 'YOUR_VAPI_ASSISTANT_ID';
-
+const VAPI_PUBLIC_KEY = import.meta.env.VITE_VAPI_PUBLIC_KEY || 'dddc9544-777b-43d8-98dc-97ecb344e57f'; // Provided by user
 const vapi = new Vapi(VAPI_PUBLIC_KEY);
 
 interface RiyaVoiceCallProps {
@@ -20,6 +25,8 @@ interface RiyaVoiceCallProps {
 export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps) {
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "started" | "ended">("disconnected");
   const [isMuted, setIsMuted] = useState(false);
+  const [serverUrl, setServerUrl] = useState<string>(() => localStorage.getItem('riya_ngrok_url') || '');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -40,7 +47,6 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
 
     vapi.on("volume-level", (volume) => {
       // Optional: Visualize volume
-      // console.log("Volume:", volume); 
     });
 
     vapi.on("error", (error) => {
@@ -59,32 +65,66 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
     };
   }, [onCallEnd, toast]);
 
+  const saveServerUrl = (url: string) => {
+    setServerUrl(url);
+    localStorage.setItem('riya_ngrok_url', url);
+  };
+
   const startCall = async () => {
     try {
-      setStatus("connecting");
-
-      // Check for keys
-      if (VAPI_PUBLIC_KEY === 'YOUR_VAPI_PUBLIC_KEY' || VAPI_ASSISTANT_ID === 'YOUR_VAPI_ASSISTANT_ID') {
+      if (!serverUrl) {
+        setIsSettingsOpen(true);
         toast({
-          title: "Configuration Missing",
-          description: "Please add VITE_VAPI_PUBLIC_KEY and VITE_VAPI_ASSISTANT_ID to your .env file.",
-          variant: "destructive"
+          title: "Configuration Needed",
+          description: "Please enter your Ngrok URL to connect Riya's brain.",
+          variant: "default"
         });
-        setStatus("disconnected");
         return;
       }
 
-      await vapi.start(VAPI_ASSISTANT_ID, {
+      setStatus("connecting");
+
+      // Clean URL: remove trailing slash and ensure protocol
+      let cleanUrl = serverUrl.trim().replace(/\/$/, '');
+      if (!cleanUrl.startsWith('http')) {
+        cleanUrl = `https://${cleanUrl}`;
+      }
+
+      const fullApiUrl = `${cleanUrl}/api/vapi/chat`;
+      console.log("Starting Vapi call with Server URL:", fullApiUrl);
+
+      // Start with Transient Assistant (No Assistant ID required) - As requested by user to avoid dashboard setup
+      await vapi.start({
+        transcriber: {
+          provider: "deepgram",
+          model: "nova-2",
+          language: "en-US"
+        },
+        model: {
+          provider: "custom-llm",
+          url: fullApiUrl,
+          messages: [
+            {
+              role: "system",
+              content: "You are Riya, a helpful and flirtatious AI assistant."
+            }
+          ]
+        },
+        voice: {
+          provider: "deepgram",
+          voiceId: "aura-asteria-en"
+        },
         metadata: {
-          userId: userId // Pass userId to context if needed
+          userId: userId
         }
       });
+
     } catch (err) {
       console.error("Failed to start call:", err);
       setStatus("disconnected");
       toast({
         title: "Error",
-        description: "Failed to start call.",
+        description: "Failed to start call. Check console for details.",
         variant: "destructive"
       });
     }
@@ -101,7 +141,34 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
   };
 
   return (
-    <div className="flex flex-col items-center justify-center p-6 bg-gray-900/50 rounded-xl backdrop-blur-sm border border-gray-800">
+    <div className="flex flex-col items-center justify-center p-6 bg-gray-900/50 rounded-xl backdrop-blur-sm border border-gray-800 relative">
+      <div className="absolute top-4 right-4">
+        <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="icon" className="text-gray-400 hover:text-white">
+              <Settings className="w-5 h-5" />
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="bg-gray-900 border-gray-800 text-white">
+            <DialogHeader>
+              <DialogTitle>Voice Configuration</DialogTitle>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-300">Ngrok URL (Required)</label>
+                <Input
+                  placeholder="https://abc.ngrok-free.app"
+                  value={serverUrl}
+                  onChange={(e) => saveServerUrl(e.target.value)}
+                  className="bg-gray-800 border-gray-700 text-white"
+                />
+                <p className="text-xs text-gray-500">Run 'ngrok http 3000' and paste the URL here so Vapi can reach your local server.</p>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
       <div className="mb-8 text-2xl font-bold text-white">Riya Voice Call</div>
 
       <div className="flex flex-col items-center gap-6">
@@ -154,7 +221,7 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
       <div className="mt-6 text-sm text-gray-400 text-center max-w-xs">
         {status === "connected"
           ? "Riya is listening. Speak naturally."
-          : "Tap the phone icon to start a voice conversation."}
+          : "Tap the phone icon. Configuring server URL helps Riya respond."}
       </div>
     </div>
   );

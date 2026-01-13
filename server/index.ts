@@ -251,7 +251,7 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
             const configData: Record<string, any> = {
               speaker: "anushka", // Hardcoded valid ID for testing
               target_language_code: "hi-IN",
-              output_audio_codec: "mp3"
+              output_audio_codec: "wav"
             };
 
             // Remove any undefined/null values

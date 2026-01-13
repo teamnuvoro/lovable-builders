@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/dialog";
 
 // Initialize Vapi SDK
-// HARDCODED as requested to rule out env var issues
 const VAPI_PUBLIC_KEY = 'dddc9544-777b-43d8-98dc-97ecb344e57f';
 const vapi = new Vapi(VAPI_PUBLIC_KEY);
 
@@ -27,8 +26,10 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "started" | "ended">("disconnected");
   const [isMuted, setIsMuted] = useState(false);
   const [serverUrl, setServerUrl] = useState<string>(() => {
-    // Priority: Local Storage -> Hardcoded fallback (User's URL) -> Env Var -> Empty
     return localStorage.getItem('riya_ngrok_url') || 'https://prosurgical-nia-carpingly.ngrok-free.dev';
+  });
+  const [assistantId, setAssistantId] = useState<string>(() => {
+    return localStorage.getItem('riya_vapi_assistant_id') || '';
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const { toast } = useToast();
@@ -38,6 +39,8 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
     vapi.on("call-start", () => {
       console.log("Vapi Call Started");
       setStatus("connected");
+      // Close settings if open
+      setIsSettingsOpen(false);
     });
 
     vapi.on("call-end", () => {
@@ -56,72 +59,43 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
     vapi.on("error", (error) => {
       console.error("Vapi Error Event:", error);
       setStatus("disconnected");
-      // Don't show toast for every minor error, but log it
     });
 
     return () => {
       vapi.stop();
       vapi.removeAllListeners();
     };
-  }, [onCallEnd, toast]);
+  }, [onCallEnd]);
 
-  const saveServerUrl = (url: string) => {
+  const saveConfiguration = (url: string, id: string) => {
     setServerUrl(url);
+    setAssistantId(id);
     localStorage.setItem('riya_ngrok_url', url);
+    localStorage.setItem('riya_vapi_assistant_id', id);
   };
 
   const startCall = async () => {
     try {
-      if (!serverUrl) {
+      if (!assistantId) {
         setIsSettingsOpen(true);
         toast({
           title: "Configuration Needed",
-          description: "Please enter your Ngrok URL to connect Riya's brain.",
+          description: "Please enter your Assistant ID from Vapi Dashboard.",
           variant: "default"
         });
         return;
       }
 
       setStatus("connecting");
+      console.log("Starting Vapi call with Assistant ID:", assistantId);
 
-      // Clean URL: remove trailing slash and ensure protocol
-      let cleanUrl = serverUrl.trim().replace(/\/$/, '');
-      if (!cleanUrl.startsWith('http')) {
-        cleanUrl = `https://${cleanUrl}`;
-      }
-
-      const fullApiUrl = `${cleanUrl}/api/vapi/chat`;
-      console.log("Starting Vapi call with Server URL:", fullApiUrl);
-
-      const transientAssistantConfig = {
-        transcriber: {
-          provider: "deepgram",
-          model: "nova-2",
-          language: "en-US"
-        },
-        model: {
-          provider: "custom-llm",
-          url: fullApiUrl,
-          messages: [
-            {
-              role: "system",
-              content: "You are Riya, a helpful and flirtatious AI assistant."
-            }
-          ]
-        },
-        voice: {
-          provider: "deepgram",
-          voiceId: "aura-asteria-en"
-        },
+      // METHOD A: The Stable Way (Persisted Assistant)
+      // Just pass the Assistant ID. Vapi grabs the config from the dashboard.
+      await vapi.start(assistantId, {
         metadata: {
           userId: userId
         }
-      };
-
-      console.log("Vapi Config:", JSON.stringify(transientAssistantConfig, null, 2));
-
-      // Start with Transient Assistant (No Assistant ID required)
-      await vapi.start(transientAssistantConfig as any);
+      });
 
     } catch (err) {
       console.error("Failed to start call:", err);
@@ -159,14 +133,30 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
             </DialogHeader>
             <div className="py-4 space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-300">Ngrok URL (Required)</label>
+                <label className="text-sm font-medium text-gray-300">Ngrok URL (For Dashboard)</label>
+                <div className="text-xs text-gray-500 mb-2 p-2 bg-gray-800 rounded select-all">
+                  {serverUrl ? `${serverUrl}/api/vapi/chat` : "Updating..."}
+                </div>
                 <Input
-                  placeholder="https://abc.ngrok-free.app"
+                  placeholder="https://..."
                   value={serverUrl}
-                  onChange={(e) => saveServerUrl(e.target.value)}
+                  onChange={(e) => saveConfiguration(e.target.value, assistantId)}
                   className="bg-gray-800 border-gray-700 text-white"
                 />
-                <p className="text-xs text-gray-500">Run 'ngrok http 3000' and paste the URL here so Vapi can reach your local server.</p>
+                <p className="text-xs text-gray-500">
+                   Copy the full URL above and paste it into "Server URL" in Vapi Dashboard -> Assistant -> Model.
+                </p>
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-gray-800">
+                <label className="text-sm font-medium text-gray-300">Assistant ID (Required)</label>
+                <Input
+                  placeholder="e.g. 84e1b..."
+                  value={assistantId}
+                  onChange={(e) => saveConfiguration(serverUrl, e.target.value)}
+                  className="bg-gray-800 border-gray-700 text-white"
+                />
+                <p className="text-xs text-gray-500">Copy this from Vapi Dashboard (at the top of your assistant page).</p>
               </div>
             </div>
           </DialogContent>
@@ -225,7 +215,7 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
       <div className="mt-6 text-sm text-gray-400 text-center max-w-xs">
         {status === "connected"
           ? "Riya is listening. Speak naturally."
-          : "Tap the phone icon. Configuring server URL helps Riya respond."}
+          : "Tap the phone icon. Use the gear icon to set your Assistant ID."}
       </div>
     </div>
   );

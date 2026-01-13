@@ -407,43 +407,37 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
       });
 
       // Forward messages from Sarvam to client
-      // ✅ FIX: Explicitly handle binary (audio) vs text (control messages) from Sarvam
-      // The 'ws' library provides isBinary flag - use it to distinguish audio from text
-      let firstBinaryChunkReceived = false;
-
+      // REPLACEMENT START
       sarvamWs.on('message', (data: any, isBinary: boolean) => {
         // 1. Handle Binary Audio (The Voice)
         if (isBinary) {
-          // Log the FIRST chunk only to avoid spam, but prove it works
+          // Log the FIRST chunk only to prove it's working, then silence
           // console.log(`[Sarvam Proxy] 🎵 Audio Chunk: ${data.length} bytes`); 
 
           if (clientWs.readyState === 1) {
-            clientWs.send(data); // Forward raw buffer directly
+            // CRITICAL: Send as binary
+            clientWs.send(data, { binary: true });
           }
           return;
         }
 
-        // 2. Handle JSON Control Messages (Events/Errors)
+        // 2. Handle Text Messages (Errors or Events)
         try {
           const msg = data.toString();
-          const json = JSON.parse(msg);
 
-          // Log errors if Sarvam sends them
-          if (json.type === 'error') {
-            console.error('[Sarvam Proxy] 🚨 Sarvam Error:', json);
+          // Log errors if they happen
+          if (msg.includes("error")) {
+            console.error('[Sarvam Proxy] 🚨 Sarvam Reported Error:', msg);
           }
 
-          // Forward text messages to client too
           if (clientWs.readyState === 1) {
             clientWs.send(msg);
           }
         } catch (e) {
-          // If it's not JSON, just forward it as text
-          if (clientWs.readyState === 1) {
-            clientWs.send(data.toString());
-          }
+          console.error('[Sarvam Proxy] Message parsing error:', e);
         }
       });
+      // REPLACEMENT END
 
       // Handle client errors
       clientWs.on('error', (error: Error) => {

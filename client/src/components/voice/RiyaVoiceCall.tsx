@@ -1,6 +1,5 @@
 
-import { useState, useEffect } from 'react';
-import Vapi from '@vapi-ai/web';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Phone, PhoneOff, Mic, MicOff, Loader2, Settings } from 'lucide-react';
@@ -13,10 +12,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-// Initialize Vapi SDK
-const VAPI_PUBLIC_KEY = 'dddc9544-777b-43d8-98dc-97ecb344e57f';
-const vapi = new Vapi(VAPI_PUBLIC_KEY);
-
+// Bolna Manual Integration
+// Since there is no React SDK, we use native WebSockets and Web Audio API
 interface RiyaVoiceCallProps {
   userId: string;
   onCallEnd?: () => void;
@@ -25,97 +22,142 @@ interface RiyaVoiceCallProps {
 export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps) {
   const [status, setStatus] = useState<"disconnected" | "connecting" | "connected" | "started" | "ended">("disconnected");
   const [isMuted, setIsMuted] = useState(false);
-  const [serverUrl, setServerUrl] = useState<string>(() => {
-    return localStorage.getItem('riya_ngrok_url') || 'https://prosurgical-nia-carpingly.ngrok-free.dev';
-  });
-  const [assistantId, setAssistantId] = useState<string>(() => {
-    return localStorage.getItem('riya_vapi_assistant_id') || '';
-  });
+
+  // Configuration
+  const [agentId, setAgentId] = useState<string>(() => localStorage.getItem('riya_bolna_agent_id') || '');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Refs for Audio/WS
+  const wsRef = useRef<WebSocket | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
   const { toast } = useToast();
 
-  useEffect(() => {
-    // Vapi Event Listeners
-    vapi.on("call-start", () => {
-      console.log("Vapi Call Started");
-      setStatus("connected");
-      // Close settings if open
-      setIsSettingsOpen(false);
-    });
-
-    vapi.on("call-end", () => {
-      console.log("Vapi Call Ended");
-      setStatus("disconnected");
-      if (onCallEnd) onCallEnd();
-    });
-
-    vapi.on("speech-start", () => console.log("User started speaking"));
-    vapi.on("speech-end", () => console.log("User stopped speaking"));
-
-    vapi.on("volume-level", (volume) => {
-      // Optional: Visualize volume
-    });
-
-    vapi.on("error", (error) => {
-      console.error("Vapi Error Event:", error);
-      setStatus("disconnected");
-    });
-
-    return () => {
-      vapi.stop();
-      vapi.removeAllListeners();
-    };
-  }, [onCallEnd]);
-
-  const saveConfiguration = (url: string, id: string) => {
-    setServerUrl(url);
-    setAssistantId(id);
-    localStorage.setItem('riya_ngrok_url', url);
-    localStorage.setItem('riya_vapi_assistant_id', id);
+  const saveConfiguration = (id: string) => {
+    setAgentId(id);
+    localStorage.setItem('riya_bolna_agent_id', id);
   };
 
   const startCall = async () => {
+    if (!agentId) {
+      setIsSettingsOpen(true);
+      toast({ title: "Agent ID Required", description: "Please enter your Bolna Agent ID from the dashboard." });
+      return;
+    }
+
     try {
-      if (!assistantId) {
-        setIsSettingsOpen(true);
-        toast({
-          title: "Configuration Needed",
-          description: "Please enter your Assistant ID from Vapi Dashboard.",
-          variant: "default"
-        });
-        return;
-      }
-
       setStatus("connecting");
-      console.log("Starting Vapi call with Assistant ID:", assistantId);
+      console.log("Connecting to Bolna Agent:", agentId);
 
-      // METHOD A: The Stable Way (Persisted Assistant)
-      // Just pass the Assistant ID. Vapi grabs the config from the dashboard.
-      await vapi.start(assistantId, {
-        metadata: {
-          userId: userId
+      // 1. Initialize Audio Context (for playback)
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+      // 2. Connect WebSocket
+      // NOTE: Using a likely WebSocket URL pattern. If this fails, we need the exact URL from docs.
+      // Trying: wss://api.bolna.ai/connection/ (common pattern) or via the backend proxy if needed.
+      // For now, attempting direct connection.
+      const wsUrl = `wss://api.bolna.ai/agent/${agentId}/connect`; // Best guess URL
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log("Bolna WebSocket Connected");
+        setStatus("connected");
+        startRecording(); // Start sending audio
+      };
+
+      ws.onmessage = async (event) => {
+        // Handle incoming audio/text
+        // Assuming binary audio or JSON events
+        if (event.data instanceof Blob) {
+          // Play Audio
+          const arrayBuffer = await event.data.arrayBuffer();
+          playAudioChunk(arrayBuffer);
+        } else if (typeof event.data === 'string') {
+          console.log("Bolna Message:", event.data);
         }
-      });
+      };
+
+      ws.onerror = (error) => {
+        console.error("Bolna WebSocket Error:", error);
+        toast({ title: "Connection Error", description: "Failed to connect to Bolna. Check Agent ID.", variant: "destructive" });
+        cleanup();
+      };
+
+      ws.onclose = () => {
+        console.log("Bolna WebSocket Closed");
+        cleanup();
+      };
 
     } catch (err) {
       console.error("Failed to start call:", err);
-      setStatus("disconnected");
-      toast({
-        title: "Error",
-        description: "Failed to start call. Check console for details.",
-        variant: "destructive"
-      });
+      cleanup();
     }
   };
 
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
+          // Send audio chunk to Bolna
+          wsRef.current.send(event.data);
+        }
+      };
+
+      mediaRecorder.start(100); // Send chunks every 100ms
+    } catch (err) {
+      console.error("Microphone Error:", err);
+      toast({ title: "Microphone Error", description: "Could not access microphone.", variant: "destructive" });
+    }
+  };
+
+  const playAudioChunk = async (arrayBuffer: ArrayBuffer) => {
+    if (!audioContextRef.current) return;
+    try {
+      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContextRef.current.destination);
+      source.start();
+    } catch (e) {
+      console.error("Audio Playback Error:", e);
+    }
+  };
+
+  const cleanup = () => {
+    setStatus("disconnected");
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      mediaRecorderRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if (onCallEnd) onCallEnd();
+  };
+
   const endCall = () => {
-    vapi.stop();
+    cleanup();
   };
 
   const toggleMute = () => {
+    // Local mute only for now
     const newMutedState = !isMuted;
-    vapi.setMuted(newMutedState);
     setIsMuted(newMutedState);
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stream.getAudioTracks().forEach(track => track.enabled = !newMutedState);
+    }
   };
 
   return (
@@ -129,41 +171,27 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
           </DialogTrigger>
           <DialogContent className="bg-gray-900 border-gray-800 text-white">
             <DialogHeader>
-              <DialogTitle>Voice Configuration</DialogTitle>
+              <DialogTitle>Bolna Configuration</DialogTitle>
             </DialogHeader>
             <div className="py-4 space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-300">Ngrok URL (For Dashboard)</label>
-                <div className="text-xs text-gray-500 mb-2 p-2 bg-gray-800 rounded select-all">
-                  {serverUrl ? `${serverUrl}/api/vapi/chat` : "Updating..."}
-                </div>
+                <label className="text-sm font-medium text-gray-300">Agent ID (Required)</label>
                 <Input
-                  placeholder="https://..."
-                  value={serverUrl}
-                  onChange={(e) => saveConfiguration(e.target.value, assistantId)}
+                  placeholder="e.g. 12345-abcde..."
+                  value={agentId}
+                  onChange={(e) => saveConfiguration(e.target.value)}
                   className="bg-gray-800 border-gray-700 text-white"
                 />
                 <p className="text-xs text-gray-500">
-                   Copy the full URL above and paste it into "Server URL" in Vapi Dashboard -> Assistant -> Model.
+                  Create an agent in Bolna Dashboard and paste the ID here.
                 </p>
-              </div>
-
-              <div className="space-y-2 pt-2 border-t border-gray-800">
-                <label className="text-sm font-medium text-gray-300">Assistant ID (Required)</label>
-                <Input
-                  placeholder="e.g. 84e1b..."
-                  value={assistantId}
-                  onChange={(e) => saveConfiguration(serverUrl, e.target.value)}
-                  className="bg-gray-800 border-gray-700 text-white"
-                />
-                <p className="text-xs text-gray-500">Copy this from Vapi Dashboard (at the top of your assistant page).</p>
               </div>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      <div className="mb-8 text-2xl font-bold text-white">Riya Voice Call</div>
+      <div className="mb-8 text-2xl font-bold text-white">Riya (Bolna)</div>
 
       <div className="flex flex-col items-center gap-6">
         {/* Status Indicator */}
@@ -214,8 +242,8 @@ export default function RiyaVoiceCall({ userId, onCallEnd }: RiyaVoiceCallProps)
       {/* Helper Text */}
       <div className="mt-6 text-sm text-gray-400 text-center max-w-xs">
         {status === "connected"
-          ? "Riya is listening. Speak naturally."
-          : "Tap the phone icon. Use the gear icon to set your Assistant ID."}
+          ? "Riya is listening."
+          : "Set your Bolna Agent ID in settings to call."}
       </div>
     </div>
   );

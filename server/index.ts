@@ -25,9 +25,8 @@ import { createClient } from "@deepgram/sdk";
 
 const app = express();
 
-// Initialize Deepgram
-// Ensure DEEPGRAM_API_KEY is present in your environment
-const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+// Initialize Deepgram (Optional now, as Vapi handles this)
+const deepgram = createClient(process.env.DEEPGRAM_API_KEY || '');
 
 // =====================================================
 // HEALTH CHECKS - MUST BE FIRST (before ANY middleware)
@@ -152,145 +151,71 @@ app.get("/api/auth/session", async (req, res) => {
   }
 });
 
+// =========================================================
+// VAPI.AI INTEGRATION (Voice-as-a-Service)
+// =========================================================
+app.post('/api/vapi/chat', async (req, res) => {
+  try {
+    const payload = req.body;
+
+    // Log incoming Vapi payload for debugging
+    // console.log('[Vapi] Payload:', JSON.stringify(payload, null, 2));
+
+    // 1. Vapi sends a "message" type when the user finishes speaking
+    // message.type can be 'transcript', 'function-call', 'speech-update', etc.
+    if (payload.message && payload.message.type === 'transcript' && payload.message.transcriptType === 'final') {
+      const userMessage = payload.message.transcript;
+
+      console.log(`[Riya Brain] User said: "${userMessage}"`);
+
+      // 2. BRAIN LOGIC
+      // TODO: Connect this to the actual getRiyaResponse(userMessage) logic in routes/chat.ts
+      // For now, using a static response to confirm architecture works
+      const aiResponse = "Hey! I can hear you perfectly now. This architecture is much better.";
+
+      // 3. Send the text back to Vapi. Vapi will speak it using the configured voice.
+      res.json({
+        message: {
+          type: "model-output",
+          output: aiResponse
+        }
+      });
+    } else {
+      // Respond 200 OK to other events (call-start, call-end, speech-update, etc.)
+      res.status(200).send();
+    }
+  } catch (error) {
+    console.error('[Vapi Error]', error);
+    res.status(500).send();
+  }
+});
+
+
 export default app;
 
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   (async () => {
-    console.log("[Server] Starting server with Deepgram Voice integration...");
+    console.log("[Server] Starting server with Vapi.ai integration...");
 
     const server = new Server(app);
 
-    // Setup WebSocket proxy for Deepgram TTS
-    const wss = new WebSocketServer({ noServer: true });
+    // Setup WebSocket proxy (Disabled for Vapi migration, but kept for potential features)
+    // const wss = new WebSocketServer({ noServer: true });
 
     server.on('upgrade', (request, socket, head) => {
+      // Vapi uses HTTP, so we don't need to upgrade WebSockets anymore for voice
+      // Keeping this block if we need WS for other features, but rejecting voice path
+
       const pathname = new URL(request.url || '/', 'http://localhost').pathname;
 
       if (pathname.startsWith('/api/sarvam/ws/proxy')) {
-        wss.handleUpgrade(request, socket, head, (ws) => {
-          handleVoiceProxy(ws, request);
-        });
+        // DISABLED FOR VAPI
+        console.log('[Server] Rejecting old WebSocket proxy connection (Using Vapi now)');
+        socket.destroy();
       } else {
         socket.destroy();
       }
     });
-
-    // Replaced Sarvam logic with Deepgram (Split Traffic: TTS=Deepgram, STT=Sarvam)
-    function handleVoiceProxy(clientWs: any, request: any) {
-      const url = new URL(request.url || '/', 'http://localhost');
-      const type = url.searchParams.get('type'); // 'stt' or 'tts'
-
-      // =========================================================
-      // CASE 1: TTS (Text-to-Speech) -> USE DEEPGRAM (The Fix)
-      // =========================================================
-      if (type === 'tts') {
-        console.log('[Voice] Client connected to TTS (Deepgram)');
-
-        clientWs.on('message', async (msg: Buffer) => {
-          try {
-            // Parse Frontend Message
-            const msgStr = msg.toString();
-            let textToSpeak = '';
-
-            try {
-              const parsed = JSON.parse(msgStr);
-              // Only respond to TEXT requests
-              if (parsed.type === 'text' && parsed.data?.text) {
-                textToSpeak = parsed.data.text;
-              }
-            } catch (e) {
-              // Not JSON
-            }
-
-            if (textToSpeak) {
-              console.log(`[Voice] 🗣️ Speaking: "${textToSpeak.substring(0, 50)}..."`);
-
-              if (!process.env.DEEPGRAM_API_KEY) {
-                console.error('[Voice] Missing DEEPGRAM_API_KEY');
-                clientWs.send(JSON.stringify({ type: 'error', message: 'Server missing Deepgram API Key' }));
-                return;
-              }
-
-              // Request Audio from Deepgram Aura
-              const response = await deepgram.speak.request(
-                { text: textToSpeak },
-                {
-                  model: "aura-asteria-en",
-                  encoding: "linear16",
-                  container: "wav",
-                  sample_rate: 24000,
-                }
-              );
-
-              // Stream Audio Back
-              const stream = await response.getStream();
-              if (stream) {
-                const reader = stream.getReader();
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-                  if (clientWs.readyState === 1) clientWs.send(value);
-                }
-              }
-            }
-          } catch (error) {
-            console.error('[Voice] TTS Error:', error);
-          }
-        });
-
-        clientWs.on('close', () => {
-          console.log('[Voice] TTS Client disconnected');
-        });
-
-        // =========================================================
-        // CASE 2: STT (Speech-to-Text) -> USE SARVAM (Restore Old Logic)
-        // =========================================================
-      } else {
-        console.log('[Voice] Client connected to STT (Sarvam Proxy)');
-
-        // Connect to Sarvam STT
-        // Ensure language-code matches what frontend expects or defaults to 'hi-IN'
-        const language = url.searchParams.get('language') || 'hi-IN';
-        const sarvamSttUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=${language}&model=saarika%3Av2.5&vad_signals=true&sample_rate=16000`;
-
-        const apiKey = process.env.SARVAM_API_KEY;
-        if (!apiKey) {
-          console.error('[Sarvam STT] Missing SARVAM_API_KEY');
-          clientWs.close(1008, 'Server missing Sarvam API Key');
-          return;
-        }
-
-        const sarvamWs = new WS(sarvamSttUrl, {
-          headers: { 'Api-Subscription-Key': apiKey }
-        });
-
-        // 1. Forward Microphone Audio: Client -> Sarvam
-        clientWs.on('message', (data: Buffer) => {
-          if (sarvamWs.readyState === WS.OPEN) {
-            sarvamWs.send(data);
-          }
-        });
-
-        // 2. Forward Transcripts: Sarvam -> Client
-        sarvamWs.on('message', (data: Buffer) => {
-          if (clientWs.readyState === WS.OPEN) {
-            clientWs.send(data);
-          }
-        });
-
-        // Log Sarvam STT Errors
-        sarvamWs.on('error', (e: Error) => {
-          console.error('[Sarvam STT] Error:', e.message);
-        });
-
-        // Cleanup
-        clientWs.on('close', () => {
-          console.log('[Voice] STT Client disconnected');
-          sarvamWs.close();
-        });
-        sarvamWs.on('close', () => clientWs.close());
-      }
-    }
 
     // Setup Vite or serve static files
     if (app.get("env") === "development") {
@@ -309,7 +234,7 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
       console.log(`[Server] ✅ Frontend server listening on port ${port}`);
       console.log(`[Server] 🔄 Supabase API routes integrated`);
       console.log(`[Server] 🔄 Chat API routes integrated`);
-      console.log(`[Server] 🔄 Voice Proxy enabled on /api/sarvam/ws/proxy (powered by Deepgram TTS + Sarvam STT)`);
+      console.log(`[Server] 🎙️ Vapi.ai Chat Endpoint ready at /api/vapi/chat`);
 
       // Initialize reminder scheduler
       initializeReminderScheduler();

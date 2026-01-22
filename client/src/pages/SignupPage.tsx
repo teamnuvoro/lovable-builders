@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -21,6 +21,7 @@ import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { OTPInput } from "@/components/OTPInput";
 import { trackSignupStarted, trackOtpVerified } from "@/utils/amplitudeTracking";
+import { sendOTP, verifyOTP, normalizePhoneNumber, createOrUpdateUserProfile } from "@/lib/supabaseAuth";
 
 const signupSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -41,9 +42,10 @@ export default function SignupPage() {
   const { login } = useAuth();
   const [step, setStep] = useState<'form' | 'otp' | 'success'>('form');
   const [signupData, setSignupData] = useState<SignupFormData | null>(null);
-  const [devModeOTP, setDevModeOTP] = useState<string | null>(null);
-  const [otpHash, setOtpHash] = useState<string | null>(null);
-  const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
+  const [isSendingOTP, setIsSendingOTP] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+
 
   const signupForm = useForm<SignupFormData>({
     resolver: zodResolver(signupSchema),
@@ -56,141 +58,182 @@ export default function SignupPage() {
 
   const otpForm = useForm<OTPFormData>({
     resolver: zodResolver(otpSchema),
+    mode: "onChange",
     defaultValues: {
       otp: "",
     },
   });
 
-  // Send OTP Mutation
-  const sendOTPMutation = useMutation({
-    mutationFn: async (data: SignupFormData) => {
-      // Add country code if not present
-      let cleanPhone = data.phoneNumber.replace(/\s+/g, '');
-      if (!cleanPhone.startsWith('+')) {
-        cleanPhone = '+91' + cleanPhone; // Default to India
-      }
+  // Prefill phone number if redirected from login (via ?phone=...)
+  useEffect(() => {
+    if (!urlParams) return;
+    const phoneParam = urlParams.get('phone');
+    if (phoneParam) {
+      signupForm.setValue('phoneNumber', phoneParam);
+    }
+  }, [urlParams, signupForm]);
 
-      const response = await apiRequest("POST", "/api/auth/send-otp", {
+  const normalizePhoneForDisplay = (phone: string) => {
+    let cleaned = phone.replace(/\s+/g, '');
+    if (!cleaned.startsWith('+')) {
+      cleaned = `+91${cleaned.replace(/^91/, '')}`;
+    }
+    return cleaned;
+  };
+
+
+  // Verify OTP and signup mutation
+  const verifyAndSignupMutation = useMutation({
+    mutationFn: async (data: { phoneNumber: string; otpCode: string; name: string; email: string }) => {
+      // Verify OTP with Supabase
+      const { session, user } = await verifyOTP(data.phoneNumber, data.otpCode);
+      
+      if (!session || !user) {
+        throw new Error('Failed to verify OTP');
+      }
+      
+      // Create or update user profile
+      const normalizedPhone = normalizePhoneNumber(data.phoneNumber);
+      const profile = await createOrUpdateUserProfile(user.id, {
         name: data.name,
         email: data.email,
-        phoneNumber: cleanPhone,
+        phoneNumber: normalizedPhone,
       });
-      return response.json();
-    },
-    onSuccess: (data, variables) => {
-      toast({
-        title: "Verification Code Sent! 📱",
-        description: data.devMode
-          ? `Dev Mode: Your OTP is ${data.otp}`
-          : "Check your phone for the 6-digit code",
-        duration: 5000,
-      });
-
-      setSignupData(variables);
-
-      // Store hash and expiresAt for stateless verification
-      if (data.hash && data.expiresAt) {
-        setOtpHash(data.hash);
-        setOtpExpiresAt(data.expiresAt);
-      }
-
-      if (data.devMode && data.otp) {
-        setDevModeOTP(data.otp);
-      }
-      setStep('otp');
-    },
-    onError: (error: any) => {
-      const errorData = error.response?.data;
-      if (errorData?.shouldLogin) {
-        toast({
-          title: "Account Already Exists",
-          description: "This email or phone number is already registered. Please login instead.",
-          variant: "destructive",
-        });
-        setTimeout(() => setLocation('/login'), 2000);
-      } else {
-        toast({
-          title: "Failed to Send OTP",
-          description: errorData?.error || "Please try again",
-          variant: "destructive",
-        });
-      }
-    },
-  });
-
-  // Verify OTP Mutation
-  const verifyOTPMutation = useMutation({
-    mutationFn: async (data: OTPFormData) => {
-      if (!signupData) throw new Error("No signup data");
-      if (!otpHash || !otpExpiresAt) throw new Error("Missing OTP verification data. Please request a new OTP.");
-
-      let cleanPhone = signupData.phoneNumber.replace(/\s+/g, '');
-      if (!cleanPhone.startsWith('+')) {
-        cleanPhone = '+91' + cleanPhone;
-      }
-
-      const response = await apiRequest("POST", "/api/auth/verify-otp", {
-        phoneNumber: cleanPhone,
-        otp: data.otp,
-        hash: otpHash,
-        expiresAt: otpExpiresAt,
-        name: signupData.name,
-        email: signupData.email
-      });
-      return response.json();
+      
+      return {
+        session,
+        user: profile,
+      };
     },
     onSuccess: (data) => {
       // Track OTP verified
       trackOtpVerified(1);
       
-      // Store session token
-      if (data.sessionToken) {
-        localStorage.setItem('sessionToken', data.sessionToken);
-      }
-
+      // Supabase handles session storage automatically
       // Update auth context
       login(data.user);
 
       // Show success message
       toast({
-        title: "Account Created Successfully! 🎉",
-        description: `Welcome ${data.user.name}! Let's start chatting with Riya.`,
+        title: "You're In! 🎉",
+        description: "Account created successfully. Welcome to Riya!",
       });
 
       setStep('success');
 
       // Redirect to chat after brief success screen
-      setTimeout(() => setLocation('/chat'), 2000);
+      setTimeout(() => setLocation('/chat'), 1500);
     },
     onError: (error: any) => {
-      toast({
-        title: "Verification Failed",
-        description: error.response?.data?.error || error.message || "Invalid OTP. Please try again.",
-        variant: "destructive",
-      });
+      setIsVerifying(false);
+      const errorData = error.response?.data;
+      const status = error.response?.status || error?.status;
+      
+      // Handle 409 Conflict - user already exists
+      if (status === 409 || errorData?.shouldLogin || errorData?.error?.includes('already exists') || errorData?.error?.includes('duplicate')) {
+        toast({
+          title: "Account Already Exists",
+          description: "This phone number is already registered. Please login instead.",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          setLocation(`/login?phone=${encodeURIComponent(signupData?.phoneNumber || '')}`);
+        }, 2000);
+      } else {
+        toast({
+          title: "Verification Failed",
+          description: errorData?.error || error.message || "Invalid OTP. Please try again.",
+          variant: "destructive",
+        });
+      }
     },
   });
 
-  const onSubmitSignup = (data: SignupFormData) => {
+  const onSubmitSignup = async (data: SignupFormData) => {
     // Track signup started
     trackSignupStarted('web');
-    sendOTPMutation.mutate(data);
+    setIsSendingOTP(true);
+    
+    try {
+      const normalizedPhone = normalizePhoneNumber(data.phoneNumber);
+      const displayPhone = normalizePhoneForDisplay(data.phoneNumber);
+      
+      setSignupData({
+        ...data,
+        phoneNumber: displayPhone,
+      });
+      
+      // Send OTP via Supabase (with metadata for signup)
+      await sendOTP(normalizedPhone, {
+        name: data.name,
+        email: data.email,
+      });
+      
+      toast({
+        title: "OTP Sent! 📱",
+        description: "Check your phone for the verification code",
+      });
+      
+      setStep('otp');
+    } catch (error: any) {
+      toast({
+        title: "Failed to Send OTP",
+        description: error.message || "Please check your phone number and try again",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSendingOTP(false);
+    }
   };
 
-  const onSubmitOTP = (data: OTPFormData) => {
-    verifyOTPMutation.mutate(data);
+  const onSubmitOTP = async (data: OTPFormData) => {
+    // Prevent double submission
+    if (isVerifying || !signupData) {
+      return;
+    }
+
+    setIsVerifying(true);
+
+    // Verify OTP via Vonage (server-side)
+    verifyAndSignupMutation.mutate({
+      phoneNumber: signupData.phoneNumber,
+      otpCode: data.otp,
+      name: signupData.name,
+      email: signupData.email,
+    });
   };
 
-  const handleResendOTP = () => {
-    if (signupData) {
-      sendOTPMutation.mutate(signupData);
+  const handleResendOTP = async () => {
+    if (!signupData) {
+      return;
+    }
+
+    setIsSendingOTP(true);
+    
+    try {
+      const normalizedPhone = normalizePhoneNumber(signupData.phoneNumber);
+      
+      // Send new OTP via Vonage (server-side)
+      await sendOTP(normalizedPhone);
+      
+      toast({
+        title: "OTP Resent",
+        description: "Please check your phone for the new code",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Failed to Resend OTP",
+        description: error.message || "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSendingOTP(false);
     }
   };
 
   const handleBackToForm = () => {
     setStep('form');
     otpForm.reset();
-    setDevModeOTP(null);
   };
 
   // Success Screen
@@ -404,10 +447,10 @@ export default function SignupPage() {
                   <Button
                     type="submit"
                     className="w-full h-14 sm:h-16 text-base sm:text-lg font-semibold rounded-full bg-[#9810fa] hover:bg-purple-700 text-white shadow-lg hover:shadow-xl transition-all duration-300 scale-100 hover:scale-102 active:scale-98"
-                    disabled={sendOTPMutation.isPending}
+                    disabled={isSendingOTP}
                     data-testid="button-signup"
                   >
-                    {sendOTPMutation.isPending ? (
+                    {isSendingOTP ? (
                       <>
                         <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                         Sending Code...
@@ -433,14 +476,6 @@ export default function SignupPage() {
                   Change details
                 </Button>
 
-                {devModeOTP && (
-                  <div className="bg-yellow-100 border border-yellow-400 rounded-xl p-4 mb-4">
-                    <p className="text-sm font-semibold text-yellow-800">🔧 Dev Mode - Your OTP:</p>
-                    <p className="text-3xl font-bold text-yellow-900 mt-2 tracking-wider">{devModeOTP}</p>
-                    <p className="text-xs text-yellow-700 mt-2">Copy this code to verify</p>
-                  </div>
-                )}
-
                 <FormField
                   control={otpForm.control}
                   name="otp"
@@ -461,13 +496,14 @@ export default function SignupPage() {
                               console.log('[Signup OTP] Length:', otpString.length);
                               console.log('[Signup OTP] Regex test /^\\d{6}$/:', /^\d{6}$/.test(otpString));
 
-                              // Update form with STRING value
-                              field.onChange(otpString);
-
-                              // Clear error when 6 digits entered
+                              // Update form with STRING value - use setValue to control validation
                               if (otpString.length === 6 && /^\d{6}$/.test(otpString)) {
-                                console.log('[Signup OTP] Clearing errors - valid 6-digit OTP');
-                                otpForm.clearErrors('otp');
+                                // Valid 6 digits - set value and clear errors, then trigger validation
+                                otpForm.setValue('otp', otpString, { shouldValidate: true, shouldDirty: true });
+                                console.log('[Signup OTP] Set valid 6-digit OTP');
+                              } else {
+                                // Less than 6 digits - update without validation to avoid error spam
+                                field.onChange(otpString);
                               }
                             }}
                           />
@@ -484,10 +520,10 @@ export default function SignupPage() {
                 <Button
                   type="submit"
                   className="w-full h-14 sm:h-16 text-base sm:text-lg font-semibold rounded-full bg-[#9810fa] hover:bg-purple-700 text-white shadow-lg"
-                  disabled={verifyOTPMutation.isPending}
+                  disabled={verifyAndSignupMutation.isPending || isVerifying}
                   data-testid="button-verify-otp"
                 >
-                  {verifyOTPMutation.isPending ? (
+                  {verifyAndSignupMutation.isPending || isVerifying ? (
                     <>
                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                       Creating Account...
@@ -501,10 +537,10 @@ export default function SignupPage() {
                   type="button"
                   variant="ghost"
                   onClick={handleResendOTP}
-                  disabled={sendOTPMutation.isPending}
+                  disabled={isSendingOTP}
                   className="w-full"
                 >
-                  {sendOTPMutation.isPending ? "Sending..." : "Resend OTP"}
+                  {isSendingOTP ? "Sending..." : "Resend OTP"}
                 </Button>
               </form>
             </Form>

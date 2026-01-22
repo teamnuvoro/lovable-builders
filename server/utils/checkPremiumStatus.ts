@@ -18,16 +18,6 @@ export async function checkPremiumStatus(
   userId: string
 ): Promise<PremiumStatusResult> {
   try {
-    // Special case: Frontend backdoor user (not a valid UUID, bypasses database)
-    if (userId === 'backdoor-user-id' || userId === '00000000-0000-0000-0000-000000000001') {
-      console.log(`[Premium Check] Backdoor user detected: ${userId} - granting premium access`);
-      return { 
-        isPremium: true, 
-        source: 'user_flag', 
-        planType: 'daily'
-      };
-    }
-
     // Validate UUID format before querying database
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(userId)) {
@@ -35,58 +25,30 @@ export async function checkPremiumStatus(
       return { isPremium: false, source: 'none' };
     }
 
-    // 1. Check Users Table (Flags & Tier)
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('premium_user, subscription_tier, subscription_end_time')
-      .eq('id', userId)
+    // ONLY CHECK CASHFREE SUBSCRIPTIONS - No daily premium, no user flags
+    // Only users with active Cashfree payments are premium
+    const { data: activeSubscription, error: subError } = await supabase
+      .from('subscriptions')
+      .select('status, plan_type')
+      .eq('user_id', userId)
+      .eq('status', 'active')
       .single();
 
-    // If user not found, continue to check other sources
-    if (userError && userError.code !== 'PGRST116') {
-      console.warn(`[Premium Check] Error querying users table for ${userId}:`, userError);
+    if (subError && subError.code !== 'PGRST116') {
+      console.warn(`[Premium Check] Error querying subscriptions table for ${userId}:`, subError);
     }
 
-    // Check if flagged as premium via boolean or tier
-    let isFlaggedPremium = userData?.premium_user === true || 
-                           userData?.subscription_tier === 'daily' || 
-                           userData?.subscription_tier === 'weekly';
-
-    // Check expiry on user record
-    if (isFlaggedPremium && userData?.subscription_end_time) {
-      const expiry = new Date(userData.subscription_end_time);
-      if (expiry <= new Date()) {
-        isFlaggedPremium = false;
-      }
-    }
-
-    if (isFlaggedPremium) {
+    if (activeSubscription && activeSubscription.status === 'active') {
+      console.log(`[Premium Check] User ${userId} has active Cashfree subscription`);
       return { 
         isPremium: true, 
-        source: 'user_flag', 
-        planType: userData?.subscription_tier || 'premium',
-        expiry: userData?.subscription_end_time ? new Date(userData.subscription_end_time) : undefined
+        source: 'subscription',
+        planType: activeSubscription.plan_type || 'premium'
       };
     }
 
-    // 2. Check Subscriptions Table (Active Stripe/External Subs)
-    const hasActiveSub = await checkUserHasActiveSubscription(supabase, userId);
-    if (hasActiveSub) {
-      return { isPremium: true, source: 'subscription' };
-    }
-
-    // 3. Check Payments Table (One-off payments)
-    const paymentStatus = await checkUserHasPayment(supabase, userId);
-    if (paymentStatus.hasPayment) {
-      return { 
-        isPremium: true, 
-        source: 'payment',
-        planType: paymentStatus.planType,
-        expiry: undefined // One-off payments might not have expiry in this context
-      };
-    }
-
-    // 4. Not Premium
+    // Not Premium - no active Cashfree subscription
+    console.log(`[Premium Check] User ${userId} is free (no active Cashfree subscription)`);
     return { isPremium: false, source: 'none' };
 
   } catch (error) {

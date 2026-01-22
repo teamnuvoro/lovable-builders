@@ -1,5 +1,5 @@
 import { useAuth } from "@/contexts/AuthContext";
-import { Redirect } from "wouter";
+import { Redirect, useLocation } from "wouter";
 import { TopNavbar } from "@/components/TopNavbar";
 
 interface ProtectedLayoutProps {
@@ -9,24 +9,11 @@ interface ProtectedLayoutProps {
 
 export function ProtectedLayout({ children, showNavbar = true }: ProtectedLayoutProps) {
     const { isAuthenticated, isLoading } = useAuth();
-
-    // 🔓 Frontend Backdoor Check
-    const backdoorActive = typeof window !== 'undefined' && 
-        (localStorage.getItem('backdoor_enabled') === 'true' || 
-         sessionStorage.getItem('backdoor_enabled') === 'true' ||
-         new URLSearchParams(window.location.search).get('backdoor') === 'true');
-
-    // If backdoor is active, bypass authentication
-    if (backdoorActive) {
-        return (
-            <div className="flex flex-col h-[100dvh] w-full bg-background">
-                {showNavbar && <TopNavbar />}
-                <div className="flex-1 overflow-y-auto overflow-x-hidden" style={{ marginTop: showNavbar ? '60px' : '0' }}>
-                    {children}
-                </div>
-            </div>
-        );
-    }
+    const [location] = useLocation();
+    
+    // Hide TopNavbar on /chat page (ChatHeader handles it)
+    const isChatPage = location === '/chat';
+    const shouldShowNavbar = showNavbar && !isChatPage;
 
     // 1. Loading State - The "Waiting Room"
     if (isLoading) {
@@ -46,8 +33,8 @@ export function ProtectedLayout({ children, showNavbar = true }: ProtectedLayout
     // 3. The "Vault" - Render Protected Content
     return (
         <div className="flex flex-col h-[100dvh] w-full bg-background">
-            {showNavbar && <TopNavbar />}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden" style={{ marginTop: showNavbar ? '60px' : '0' }}>
+            {shouldShowNavbar && <TopNavbar />}
+            <div className="flex-1 overflow-y-auto overflow-x-hidden" style={{ marginTop: shouldShowNavbar ? '60px' : '0' }}>
                 {children}
             </div>
         </div>

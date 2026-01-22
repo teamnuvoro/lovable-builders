@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -21,7 +21,8 @@ import { motion } from "framer-motion";
 import { OTPInput } from "@/components/OTPInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { trackLoginSuccessful, trackOtpVerified, trackReturningUserLogin } from "@/utils/amplitudeTracking";
-import { enableBackdoor } from "@/components/BackdoorActivator";
+import { sendOTP, verifyOTP, normalizePhoneNumber } from "@/lib/supabaseAuth";
+import { supabase } from "@/lib/supabase";
 
 const loginSchema = z.object({
   phoneNumber: z.string().min(10, "Phone number must be at least 10 digits"),
@@ -39,18 +40,50 @@ export default function LoginPage() {
   const { toast } = useToast();
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [userName, setUserName] = useState('');
-  const [devModeOTP, setDevModeOTP] = useState<string | null>(null);
-  const [backdoorPassword, setBackdoorPassword] = useState('');
+  const [isSendingOTP, setIsSendingOTP] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
 
-  const { login } = useAuth(); // Import login from useAuth
-  const [otpHash, setOtpHash] = useState<string | null>(null);
-  const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
-  
-  // Check if entered phone is backdoor number
-  const isBackdoorPhone = (phone: string) => {
-    const clean = phone.replace(/\s+/g, '').replace(/^\+91/, '').replace(/^91/, '');
-    return clean === '8828447880';
+  const { login } = useAuth();
+
+
+  const completeLogin = (data: any) => {
+    // Track OTP verified
+    trackOtpVerified(1);
+    
+    // Check if returning user (has previous sessions)
+    const isReturningUser = data.user?.created_at ? 
+      (Date.now() - new Date(data.user.created_at).getTime()) > 24 * 60 * 60 * 1000 : false;
+    
+    if (isReturningUser) {
+      trackReturningUserLogin();
+    } else {
+      trackLoginSuccessful();
+    }
+
+    // Store session token
+    if (data.sessionToken) {
+      localStorage.setItem('sessionToken', data.sessionToken);
+    }
+
+    // Update Auth Context
+    login(data.user);
+
+    toast({
+      title: "Welcome Back! 🎉",
+      description: `Hi ${data.user.name}! Let's continue chatting with Riya.`,
+    });
+
+    // Redirect to chat
+    setTimeout(() => setLocation('/chat'), 1500);
+  };
+
+
+  const normalizePhoneForDisplay = (phone: string) => {
+    let cleaned = phone.replace(/\s+/g, '');
+    if (!cleaned.startsWith('+')) {
+      cleaned = `+91${cleaned.replace(/^91/, '')}`;
+    }
+    return cleaned;
   };
 
   const loginForm = useForm<LoginFormData>({
@@ -62,214 +95,121 @@ export default function LoginPage() {
 
   const otpForm = useForm<OTPFormData>({
     resolver: zodResolver(otpSchema),
+    mode: "onChange",
     defaultValues: {
       otp: "",
     },
   });
 
-  // Send Login OTP Mutation
-  const sendLoginOTPMutation = useMutation({
-    mutationFn: async (data: LoginFormData) => {
-      const response = await apiRequest("POST", "/api/auth/login", data);
-      return response.json();
-    },
-    onSuccess: (data, variables) => {
-      toast({
-        title: "OTP Sent!",
-        description: data.devMode
-          ? `Dev Mode: Your OTP is ${data.otp}`
-          : "Check your phone for the verification code",
-      });
-      setPhoneNumber(variables.phoneNumber);
-      setUserName(data.userName || '');
-
-      // Store hash and expiresAt for stateless verification
-      if (data.hash && data.expiresAt) {
-        setOtpHash(data.hash);
-        setOtpExpiresAt(data.expiresAt);
-      }
-
-      if (data.devMode && data.otp) {
-        setDevModeOTP(data.otp);
-      }
-      setStep('otp');
-    },
-    onError: (error: any) => {
-      const errorData = error.response?.data;
-      if (errorData?.shouldSignup) {
-        toast({
-          title: "No Account Found",
-          description: "This phone number is not registered. Please sign up first.",
-          variant: "destructive",
-        });
-        setTimeout(() => setLocation('/signup'), 2000);
-      } else {
-        toast({
-          title: "Failed to Send OTP",
-          description: errorData?.error || "Please check your phone number and try again",
-          variant: "destructive",
-        });
-      }
-    },
-  });
-
-  // Backdoor Login Mutation
-  const backdoorLoginMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/auth/backdoor-login", {
-        phoneNumber,
-        password: backdoorPassword
-      });
-      return response.json();
+  // Verify OTP and login mutation
+  const verifyAndLoginMutation = useMutation({
+    mutationFn: async (data: { phoneNumber: string; otpCode: string }) => {
+      const result = await verifyOTP(data.phoneNumber, data.otpCode);
+      return result;
     },
     onSuccess: (data) => {
-      // Track login successful
-      trackLoginSuccessful(true, data.user.id);
-      
       // Store session token
       if (data.sessionToken) {
         localStorage.setItem('sessionToken', data.sessionToken);
       }
-
-      // Update Auth Context
+      
+      // Complete login
       login(data.user);
-
-      toast({
-        title: "Backdoor Access Granted! 🔓",
-        description: `Hi ${data.user.name}! Logged in via backdoor.`,
-      });
-
-      // Redirect to chat
-      setTimeout(() => setLocation('/chat'), 1500);
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Backdoor Login Failed",
-        description: error.response?.data?.error || error.message || "Invalid credentials.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Verify Login OTP Mutation
-  const verifyLoginOTPMutation = useMutation({
-    mutationFn: async (data: OTPFormData) => {
-      if (!otpHash || !otpExpiresAt) {
-        throw new Error("Missing OTP verification data. Please request a new OTP.");
-      }
-
-      const response = await apiRequest("POST", "/api/auth/verify-login-otp", {
-        phoneNumber,
-        otp: data.otp,
-        hash: otpHash,
-        expiresAt: otpExpiresAt
-      });
-      return response.json();
-    },
-    onSuccess: (data) => {
-      // Track OTP verified
+      
       trackOtpVerified(1);
+      trackLoginSuccessful('phone');
       
-      // Check if returning user (has previous sessions)
-      const isReturningUser = data.user?.created_at ? 
-        (Date.now() - new Date(data.user.created_at).getTime()) > 24 * 60 * 60 * 1000 : false;
-      
-      // Track login successful
-      trackLoginSuccessful(isReturningUser, data.user.id);
-      
-      // Track returning user login if applicable
-      if (isReturningUser) {
-        const daysSinceLastSession = data.user?.last_login_at ? 
-          Math.floor((Date.now() - new Date(data.user.last_login_at).getTime()) / (24 * 60 * 60 * 1000)) : 0;
-        trackReturningUserLogin(daysSinceLastSession);
-      }
-      
-      // Store session token
-      if (data.sessionToken) {
-        localStorage.setItem('sessionToken', data.sessionToken);
-      }
-
-      // Update Auth Context
-      login(data.user);
-
       toast({
         title: "Welcome Back! 🎉",
-        description: `Hi ${data.user.name}! Let's continue chatting with Riya.`,
+        description: "You've been logged in successfully",
       });
-
-      // Redirect to chat
-      setTimeout(() => setLocation('/chat'), 1500);
+      
+      setTimeout(() => setLocation('/chat'), 1000);
     },
     onError: (error: any) => {
+      setIsVerifying(false);
+      const errorMessage = error.message || "Unable to complete login. Please try again.";
+      
       toast({
-        title: "Verification Failed",
-        description: error.response?.data?.error || error.message || "Invalid OTP. Please try again.",
+        title: "Login Failed",
+        description: errorMessage,
         variant: "destructive",
       });
     },
   });
 
-  const onSubmitPhone = (data: LoginFormData) => {
-    // Check if this is backdoor phone number
-    if (isBackdoorPhone(data.phoneNumber)) {
-      // Show password field or directly login if password is already entered
-      if (backdoorPassword) {
-        let cleanPhone = data.phoneNumber.replace(/\s+/g, '');
-        if (!cleanPhone.startsWith('+')) {
-          cleanPhone = '+91' + cleanPhone;
-        }
-        setPhoneNumber(cleanPhone);
-        backdoorLoginMutation.mutate();
-      } else {
-        // Password field will appear below
-        toast({
-          title: "Backdoor Access",
-          description: "Enter password to continue",
-        });
-      }
-      return;
-    }
+  const onSubmitPhone = async (data: LoginFormData) => {
+    setIsSendingOTP(true);
     
-    // Normal OTP flow
-    // Add country code if not present
-    let cleanPhone = data.phoneNumber.replace(/\s+/g, '');
-    if (!cleanPhone.startsWith('+')) {
-      cleanPhone = '+91' + cleanPhone; // Default to India
-    }
-    sendLoginOTPMutation.mutate({ phoneNumber: cleanPhone });
-  };
-  
-  const handleBackdoorLogin = () => {
-    if (!backdoorPassword) {
+    try {
+      const normalizedPhone = normalizePhoneNumber(data.phoneNumber);
+      const displayPhone = normalizePhoneForDisplay(data.phoneNumber);
+      
+      setPhoneNumber(displayPhone);
+      
+      // Send OTP via Vonage (server-side)
+      await sendOTP(normalizedPhone);
+      
       toast({
-        title: "Password Required",
-        description: "Please enter the backdoor password",
+        title: "OTP Sent! 📱",
+        description: "Check your phone for the verification code",
+      });
+      
+      setStep('otp');
+    } catch (error: any) {
+      toast({
+        title: "Failed to Send OTP",
+        description: error.message || "Please check your phone number and try again",
         variant: "destructive",
       });
+    } finally {
+      setIsSendingOTP(false);
+    }
+  };
+
+  const onSubmitOTP = async (data: OTPFormData) => {
+    // Prevent double submission
+    if (isVerifying) {
       return;
     }
+
+    setIsVerifying(true);
+
+    // Verify OTP via Vonage (server-side)
+    verifyAndLoginMutation.mutate({
+      phoneNumber,
+      otpCode: data.otp,
+    });
+  };
+
+  const handleResendOTP = async () => {
     const formData = loginForm.getValues();
-    let cleanPhone = formData.phoneNumber.replace(/\s+/g, '');
-    if (!cleanPhone.startsWith('+')) {
-      cleanPhone = '+91' + cleanPhone;
+    setIsSendingOTP(true);
+    
+    try {
+      const normalizedPhone = normalizePhoneNumber(formData.phoneNumber || phoneNumber);
+      
+      // Send new OTP via Vonage (server-side)
+      await sendOTP(normalizedPhone);
+      
+      toast({
+        title: "OTP Resent",
+        description: "Please check your phone for the new code",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Failed to Resend OTP",
+        description: error.message || "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSendingOTP(false);
     }
-    setPhoneNumber(cleanPhone);
-    backdoorLoginMutation.mutate();
-  };
-
-  const onSubmitOTP = (data: OTPFormData) => {
-    verifyLoginOTPMutation.mutate(data);
-  };
-
-  const handleResendOTP = () => {
-    const formData = loginForm.getValues();
-    sendLoginOTPMutation.mutate(formData);
   };
 
   const handleBackToPhone = () => {
     setStep('phone');
     otpForm.reset();
-    setDevModeOTP(null);
   };
 
   return (
@@ -321,7 +261,7 @@ export default function LoginPage() {
             className="text-3xl sm:text-4xl font-bold text-[#9810fa] mb-2 relative"
             data-testid="text-login-title"
           >
-            {step === 'phone' ? 'Welcome Back!' : (userName ? `Hi ${userName}!` : 'Hi!')}
+            {step === 'phone' ? 'Welcome Back!' : 'Hi!'}
             <motion.span
               initial={{ opacity: 0, scale: 0.5, rotate: 0 }}
               animate={{ opacity: 1, scale: 1, rotate: [0, 15, -15, 0] }}
@@ -369,7 +309,6 @@ export default function LoginPage() {
                           {...field}
                           onChange={(e) => {
                             field.onChange(e);
-                            setBackdoorPassword(''); // Reset password when phone changes
                           }}
                           data-testid="input-phone"
                         />
@@ -380,44 +319,17 @@ export default function LoginPage() {
                   )}
                 />
 
-                {/* Backdoor Password Field - Only shown for backdoor phone */}
-                {isBackdoorPhone(loginForm.watch('phoneNumber') || '') && (
-                  <div className="space-y-2">
-                    <label className="text-[#364153] font-medium text-sm sm:text-base">Backdoor Password</label>
-                    <Input
-                      type="password"
-                      placeholder="Enter backdoor password"
-                      value={backdoorPassword}
-                      onChange={(e) => setBackdoorPassword(e.target.value)}
-                      className="h-12 sm:h-14 rounded-xl border-gray-200 bg-[#f3f3f5] focus:bg-white focus:border-purple-400 focus:ring-2 focus:ring-purple-400/50 transition-all duration-300"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && backdoorPassword) {
-                          handleBackdoorLogin();
-                        }
-                      }}
-                    />
-                    <p className="text-xs text-yellow-600 font-medium">🔓 Backdoor access mode</p>
-                  </div>
-                )}
-
                 <Button
                   type="submit"
                   className="w-full h-14 sm:h-16 text-base sm:text-lg font-semibold rounded-full bg-[#9810fa] hover:bg-purple-700 text-white shadow-lg"
-                  disabled={sendLoginOTPMutation.isPending || backdoorLoginMutation.isPending}
+                  disabled={isSendingOTP}
                   data-testid="button-send-otp"
                 >
-                  {backdoorLoginMutation.isPending ? (
-                    <>
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Authenticating...
-                    </>
-                  ) : sendLoginOTPMutation.isPending ? (
+                  {isSendingOTP ? (
                     <>
                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                       Sending OTP...
                     </>
-                  ) : isBackdoorPhone(loginForm.watch('phoneNumber') || '') ? (
-                    "Backdoor Login"
                   ) : (
                     "Send Verification Code"
                   )}
@@ -438,13 +350,6 @@ export default function LoginPage() {
                   Change number
                 </Button>
 
-                {devModeOTP && (
-                  <div className="bg-yellow-100 border border-yellow-400 rounded-xl p-4 mb-4">
-                    <p className="text-sm font-semibold text-yellow-800">Dev Mode - Your OTP:</p>
-                    <p className="text-2xl font-bold text-yellow-900 mt-2">{devModeOTP}</p>
-                  </div>
-                )}
-
                 <FormField
                   control={otpForm.control}
                   name="otp"
@@ -456,7 +361,17 @@ export default function LoginPage() {
                           <OTPInput
                             length={6}
                             value={field.value || ''}
-                            onChange={(value) => field.onChange(value)}
+                            onChange={(value) => {
+                              const otpString = String(value);
+                              // Update form with STRING value - use setValue to control validation
+                              if (otpString.length === 6 && /^\d{6}$/.test(otpString)) {
+                                // Valid 6 digits - set value and trigger validation
+                                otpForm.setValue('otp', otpString, { shouldValidate: true, shouldDirty: true });
+                              } else {
+                                // Less than 6 digits - update without validation to avoid error spam
+                                field.onChange(otpString);
+                              }
+                            }}
                           />
                         </div>
                       </FormControl>
@@ -468,10 +383,10 @@ export default function LoginPage() {
                 <Button
                   type="submit"
                   className="w-full h-14 sm:h-16 text-base sm:text-lg font-semibold rounded-full bg-[#9810fa] hover:bg-purple-700 text-white shadow-lg"
-                  disabled={verifyLoginOTPMutation.isPending}
+                  disabled={verifyAndLoginMutation.isPending || isVerifying}
                   data-testid="button-verify-otp"
                 >
-                  {verifyLoginOTPMutation.isPending ? (
+                  {verifyAndLoginMutation.isPending || isVerifying ? (
                     <>
                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                       Verifying...
@@ -485,10 +400,10 @@ export default function LoginPage() {
                   type="button"
                   variant="ghost"
                   onClick={handleResendOTP}
-                  disabled={sendLoginOTPMutation.isPending}
+                  disabled={isSendingOTP}
                   className="w-full"
                 >
-                  {sendLoginOTPMutation.isPending ? "Sending..." : "Resend OTP"}
+                  {isSendingOTP ? "Sending..." : "Resend OTP"}
                 </Button>
               </form>
             </Form>
@@ -512,70 +427,6 @@ export default function LoginPage() {
           </button>
         </motion.p>
 
-        {/* Backdoor Options */}
-        {step === 'phone' && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.5 }}
-            className="mt-6 w-full max-w-md space-y-3"
-          >
-            {/* Backend Backdoor Button */}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                // Pre-fill backdoor credentials and auto-login
-                loginForm.setValue('phoneNumber', '8828447880');
-                setPhoneNumber('+918828447880');
-                setBackdoorPassword('0000');
-                // Auto-trigger login after a brief moment
-                setTimeout(() => {
-                  backdoorLoginMutation.mutate();
-                }, 100);
-              }}
-              disabled={backdoorLoginMutation.isPending}
-              className="w-full h-12 text-sm font-medium rounded-full border-2 border-gray-300 hover:border-purple-400 hover:bg-purple-50 text-gray-700 hover:text-purple-700 transition-all duration-300 shadow-sm"
-              data-testid="button-backdoor"
-            >
-              {backdoorLoginMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Authenticating...
-                </>
-              ) : (
-                <>
-                  <span className="text-lg mr-2">🔒</span>
-                  Backdoor Sign In (Testing)
-                </>
-              )}
-            </Button>
-
-            {/* Frontend Backdoor Button */}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                enableBackdoor();
-                toast({
-                  title: "🔓 Frontend Backdoor Enabled!",
-                  description: "Refresh the page to access all routes without authentication.",
-                });
-                setTimeout(() => {
-                  window.location.href = '/chat';
-                }, 1500);
-              }}
-              className="w-full h-12 text-sm font-medium rounded-full border-2 border-green-300 hover:border-green-500 hover:bg-green-50 text-gray-700 hover:text-green-700 transition-all duration-300 shadow-sm"
-              data-testid="button-frontend-backdoor"
-            >
-              <span className="text-lg mr-2">🚪</span>
-              Enable Frontend Backdoor (No Auth)
-            </Button>
-            <p className="text-xs text-gray-400 text-center mt-2">
-              Quick access for testing • Press Ctrl+Shift+B to toggle
-            </p>
-          </motion.div>
-        )}
       </div>
     </div>
   );

@@ -161,33 +161,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // 🔓 AUTHENTICATION DISABLED - Always return authenticated
-  const isAuthDisabled = true; // Set to true to disable authentication
-  
-  // 🔓 Frontend Backdoor Check
-  const backdoorActive = typeof window !== 'undefined' && 
-      (localStorage.getItem('backdoor_enabled') === 'true' || 
-       sessionStorage.getItem('backdoor_enabled') === 'true');
-
-  // If backdoor is active, provide mock user
-  const backdoorUser: User | null = backdoorActive ? {
-    id: 'backdoor-user-id',
-    name: 'Backdoor User',
-    email: 'backdoor@test.com',
-    phone_number: '8828447880',
-    premium_user: true,
-    onboarding_complete: true,
-  } : null;
-
   return (
     <AuthContext.Provider
       value={{
-        user: backdoorActive ? (user || backdoorUser) : user,
+        user,
         login,
         logout,
         refetchUser,
-        isAuthenticated: backdoorActive ? true : !!user,
-        isLoading: backdoorActive ? false : isLoading,
+        isAuthenticated: !!user,
+        isLoading,
       }}
     >
       {children}

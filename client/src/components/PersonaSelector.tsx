@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -65,6 +65,8 @@ interface PersonaSelectorProps {
 
 export function PersonaSelector({ currentPersona, onPersonaChange, compact = false }: PersonaSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const { user, refetchUser } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -171,11 +173,23 @@ export function PersonaSelector({ currentPersona, onPersonaChange, compact = fal
 
   const Icon = currentPersonaData.icon;
 
+  // Calculate dropdown position when opening
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY + 8, // 8px = mt-2 equivalent
+        left: rect.left + window.scrollX,
+      });
+    }
+  }, [isOpen]);
+
   if (compact) {
     // Force re-render by using key based on persona
     return (
       <div className="relative" key={`persona-selector-${mappedPersonaId}`}>
         <Button
+          ref={buttonRef}
           variant="ghost"
           size="sm"
           onClick={() => setIsOpen(!isOpen)}
@@ -188,12 +202,23 @@ export function PersonaSelector({ currentPersona, onPersonaChange, compact = fal
 
         <AnimatePresence>
           {isOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="absolute top-full left-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 min-w-[200px] z-50 overflow-hidden"
-            >
+            <>
+              {/* Backdrop to close dropdown */}
+              <div 
+                className="fixed inset-0 z-[9998]" 
+                onClick={() => setIsOpen(false)}
+              />
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="fixed bg-white rounded-lg shadow-2xl border-2 border-gray-300 min-w-[240px] z-[9999] overflow-hidden"
+                style={{
+                  top: `${dropdownPosition.top}px`,
+                  left: `${dropdownPosition.left}px`,
+                  boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)',
+                }}
+              >
               {PERSONAS.map((persona) => {
                 const PersonaIcon = persona.icon;
                 const isSelected = persona.id === mappedPersonaId;
@@ -219,7 +244,8 @@ export function PersonaSelector({ currentPersona, onPersonaChange, compact = fal
                   </button>
                 );
               })}
-            </motion.div>
+              </motion.div>
+            </>
           )}
         </AnimatePresence>
       </div>
@@ -229,6 +255,7 @@ export function PersonaSelector({ currentPersona, onPersonaChange, compact = fal
   return (
     <div className="relative" key={`persona-selector-full-${mappedPersonaId}`}>
       <Button
+        ref={buttonRef}
         variant="outline"
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2"
@@ -245,14 +272,19 @@ export function PersonaSelector({ currentPersona, onPersonaChange, compact = fal
         {isOpen && (
           <>
             <div
-              className="fixed inset-0 z-40"
+              className="fixed inset-0 z-[9998]"
               onClick={() => setIsOpen(false)}
             />
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="absolute top-full left-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 min-w-[240px] z-50 overflow-hidden"
+              className="fixed bg-white rounded-lg shadow-2xl border-2 border-gray-300 min-w-[240px] z-[9999] overflow-hidden"
+              style={{
+                top: `${dropdownPosition.top}px`,
+                left: `${dropdownPosition.left}px`,
+                boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)',
+              }}
             >
               <div className="p-2">
                 <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-2 py-1">

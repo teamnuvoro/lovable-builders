@@ -45,7 +45,7 @@ export function ChatMessages({ messages, isLoading, isMobile, isTyping }: ChatMe
     <div 
       ref={containerRef}
       onScroll={handleScroll}
-      className="h-full w-full overflow-y-auto px-4 py-3 bg-white relative"
+      className="h-full w-full px-3 sm:px-4 py-4 bg-white relative"
       style={{
         scrollbarWidth: 'thin',
         scrollbarColor: 'rgba(255, 105, 180, 0.3) transparent',
@@ -56,10 +56,11 @@ export function ChatMessages({ messages, isLoading, isMobile, isTyping }: ChatMe
           radial-gradient(circle at 50px 50px, rgba(255, 182, 193, 0.05) 1px, transparent 0)
         `,
         backgroundSize: '50px 50px, 75px 75px, 100px 100px',
-        backgroundPosition: '0 0, 12px 12px, 25px 25px'
+        backgroundPosition: '0 0, 12px 12px, 25px 25px',
+        paddingBottom: '80px', // Space for input bar so last message isn't hidden
       }}
     >
-      <div className="max-w-2xl mx-auto w-full space-y-3 sm:space-y-4">
+      <div className="max-w-2xl mx-auto w-full space-y-2 sm:space-y-3">
         {/* Relationship Tip Card */}
         {showTip && (
           <div className="tip-card mb-4 animate-bubble">

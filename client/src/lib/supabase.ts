@@ -4,20 +4,32 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://xgraxcgavqeyqfwimbwt.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Supabase URL or Key is missing!');
-}
-
-export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
-  auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
-  }
-});
-
 // Flag to check if Supabase is properly configured
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
+
+if (!isSupabaseConfigured) {
+  console.warn('[Supabase] Missing VITE_SUPABASE_ANON_KEY. Client will be disabled.');
+}
+
+const createSupabaseClient = () =>
+  createClient(supabaseUrl, supabaseAnonKey as string, {
+    auth: {
+      storage: localStorage,
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  });
+
+export const supabase: ReturnType<typeof createSupabaseClient> | any = isSupabaseConfigured
+  ? createSupabaseClient()
+  : new Proxy(
+      {},
+      {
+        get() {
+          throw new Error('Supabase client not configured. Set VITE_SUPABASE_ANON_KEY.');
+        },
+      },
+    );
 
 export type PersonaType = 'sweet_supportive' | 'playful_flirty' | 'bold_confident' | 'calm_mature';
 export type GenderType = 'male' | 'female' | 'other' | 'prefer_not_to_say';

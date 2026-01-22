@@ -34,11 +34,12 @@ interface CallSession {
 
 router.get('/api/call/config', async (req: Request, res: Response) => {
   try {
-    // For browser-based voice calls, prioritize Sarvam (WebSocket STT/TTS)
-    // Bolna is for phone-based calls which require a phone number
+    // RESTORED: Use Sarvam for voice (TTS) with Vapi handling orchestration
+    // Vapi handles: WebRTC, transcriber, call management
+    // Sarvam handles: Voice/TTS (Indian accent)
     const sarvamApiKey = process.env.SARVAM_API_KEY;
     if (sarvamApiKey) {
-      console.log('[Call Config] Using Sarvam AI for voice calls (browser WebSocket)');
+      console.log('[Call Config] Using Sarvam for voice calls (browser WebSocket)');
       return res.json({
         ready: true,
         provider: 'sarvam',
@@ -46,7 +47,7 @@ router.get('/api/call/config', async (req: Request, res: Response) => {
       });
     }
 
-    // Fallback to Vapi (browser-based)
+    // Fallback to Vapi (if Sarvam not configured)
     const publicKey = process.env.VAPI_PUBLIC_KEY || process.env.VITE_VAPI_PUBLIC_KEY;
     if (publicKey) {
       console.log('[Call Config] Using Vapi for voice calls');

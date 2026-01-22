@@ -12,16 +12,27 @@ async function throwIfResNotOk(res: Response) {
     // Try to parse error JSON
     let errorData;
     try {
-      errorData = await res.json();
+      const text = await res.clone().text();
+      if (text) {
+        errorData = JSON.parse(text);
+      }
     } catch {
       // If text or empty, it's not JSON, so we'll rely on statusText or a generic message.
     }
 
-    // Construct robust error object
-    const error = new Error(errorData?.message || res.statusText || "Unknown error");
+    // Construct robust error object - prioritize details field for better error messages
+    const errorMessage = 
+      errorData?.details || 
+      errorData?.message || 
+      errorData?.error || 
+      res.statusText || 
+      `HTTP ${res.status} Error`;
+    
+    const error = new Error(errorMessage);
     (error as any).status = res.status;
     (error as any).code = errorData?.code;
     (error as any).details = errorData;
+    (error as any).internalError = errorData?.internalError; // Include internal error in dev mode
 
     const traceId = res.headers.get("X-Trace-ID");
     if (traceId) {
@@ -33,6 +44,8 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+// In development, use relative URLs so Vite proxy works
+// In production, use VITE_API_URL if set
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export async function apiRequest(
@@ -40,7 +53,14 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const fullUrl = url.startsWith("http") ? url : `${API_BASE}${url}`;
+  // If URL is already absolute, use it as-is
+  // Otherwise, if API_BASE is set, prepend it
+  // If API_BASE is empty (dev mode), use relative URL (Vite proxy will handle it)
+  const fullUrl = url.startsWith("http") 
+    ? url 
+    : API_BASE 
+      ? `${API_BASE}${url}` 
+      : url; // Relative URL - Vite proxy will forward to backend
   
   // GET and HEAD requests cannot have a body
   const methodsWithoutBody = ['GET', 'HEAD'];

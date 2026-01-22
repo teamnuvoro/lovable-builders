@@ -13,8 +13,8 @@ import RiyaVoiceCall from '@/components/voice/RiyaVoiceCall';
 
 type CallStatus = 'idle' | 'connecting' | 'connected' | 'speaking' | 'listening' | 'ended';
 
-const FREE_CALL_LIMIT_SECONDS = 135;
-const WARNING_THRESHOLD_SECONDS = 110;
+const FREE_CALL_LIMIT_SECONDS = 120; // 2 minutes for free users
+const WARNING_THRESHOLD_SECONDS = 100; // Warning at 100 seconds (20 seconds remaining)
 
 export default function CallPage() {
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
@@ -116,10 +116,33 @@ export default function CallPage() {
 
   // Initialize Vapi (fallback)
   useEffect(() => {
+    // CRITICAL: Check provider FIRST at useEffect level to prevent ANY initialization
+    if (callConfig?.provider === 'bolna' || callConfig?.provider === 'sarvam') {
+      console.log('[CallPage] Provider is', callConfig?.provider, '- skipping ALL Vapi initialization');
+      setIsVapiReady(false);
+      // Clean up any existing instance
+      if (vapiRef.current) {
+        console.log('[CallPage] Cleaning up existing Vapi instance');
+        try {
+          vapiRef.current.stop();
+        } catch (e) {
+          // Ignore stop errors during cleanup
+        }
+        vapiRef.current = null;
+      }
+      return; // Exit useEffect early - don't run initVapi at all
+    }
+
     const initVapi = async () => {
-      // Only initialize Vapi if not using Bolna
-      if (callConfig?.provider === 'bolna') {
-        setIsVapiReady(false);
+      // Also skip if config is still loading
+      if (configLoading) {
+        console.log('[CallPage] Config still loading, skipping Vapi init');
+        return;
+      }
+      
+      // Double-check provider hasn't changed
+      if (callConfig?.provider === 'bolna' || callConfig?.provider === 'sarvam') {
+        console.log('[CallPage] Provider changed to', callConfig?.provider, 'during init, aborting');
         return;
       }
 
@@ -454,11 +477,28 @@ export default function CallPage() {
           };
         }
       } else {
-        // Vapi fallback
+        // Vapi/Sarvam providers - DISABLED: RiyaVoiceCall component handles all calls via singleton
+        // This legacy code path uses invalid model.messages format and causes 400 errors
+        // RiyaVoiceCall component uses the correct flat config format
+        if (provider === 'sarvam' || provider === 'vapi') {
+          console.warn('[CallPage] Legacy Vapi code path blocked - RiyaVoiceCall component handles calls');
+          throw new Error(`${provider} provider uses RiyaVoiceCall component, not legacy Vapi code. The call button in RiyaVoiceCall should be used instead.`);
+        }
+
+        // This code path should never execute now - kept for reference only
         if (!vapiRef.current) {
           throw new Error('Vapi not initialized');
         }
 
+        // LEGACY CODE - DISABLED: Uses invalid model.messages format for web calls
+        // This causes 400 Bad Request errors
+        // All calls should go through RiyaVoiceCall component instead
+        console.error('[CallPage] ERROR: Legacy Vapi code path should not execute');
+        throw new Error('Legacy Vapi code path is disabled. Use RiyaVoiceCall component for all voice calls.');
+        
+        /* DISABLED CODE - DO NOT USE
+        // This legacy code uses model.messages which causes 400 errors in Vapi web calls
+        // All calls should go through RiyaVoiceCall component which uses the correct format
         const vapiStartPromise = vapiRef.current.start({
           model: {
             provider: "openai",
@@ -500,6 +540,7 @@ export default function CallPage() {
         }).catch(err => console.error("Failed to track call start:", err));
 
         await vapiStartPromise;
+        */
       }
 
     } catch (error: any) {
@@ -599,12 +640,19 @@ export default function CallPage() {
         vapiRef.current = null;
         console.log('✅ Vapi ref DESTROYED');
 
-        // Reinitialize Vapi for next call
+        // DISABLED: Reinitialization removed - Sarvam uses singleton from vapiCallManager
+        // Do not create new Vapi instances here
+        if (callConfig?.provider === 'sarvam') {
+          console.log('[CallPage] Skipping Vapi reinitialization - Sarvam uses singleton');
+          return;
+        }
+        
+        // Reinitialize Vapi for next call (only for non-Sarvam providers)
         setTimeout(() => {
           console.log('🔄 Reinitializing Vapi for next call...');
           try {
             const publicKey = callConfig?.publicKey || import.meta.env.VITE_VAPI_PUBLIC_KEY;
-            if (publicKey) {
+            if (publicKey && callConfig?.provider !== 'sarvam') {
               const newVapi = new Vapi(publicKey);
               vapiRef.current = newVapi;
               console.log('✅ New Vapi instance ready');
@@ -700,18 +748,39 @@ export default function CallPage() {
     ? (isBolnaReady && callConfig?.ready)
     : (isVapiConfigured() || !!callConfig?.publicKey);
 
-  // If Sarvam is the configured provider, use the dedicated Sarvam voice component.
+  // If Vapi or Sarvam is the configured provider, use the dedicated RiyaVoiceCall component.
+  // This component handles all voice calls with the correct format (no model.messages).
   // This check MUST be after all hooks to avoid "Rendered fewer hooks" error.
-  if (callConfig?.ready && callConfig?.provider === 'sarvam') {
+  if (callConfig?.ready && (callConfig?.provider === 'vapi' || callConfig?.provider === 'sarvam')) {
     return (
-      <div className="flex flex-col h-full w-full items-center justify-center p-6" style={{
-        background: 'linear-gradient(180deg, #9333ea 0%, #a855f7 30%, #c084fc 60%, #e9d5ff 100%)'
-      }}>
-        {user?.id ? (
-          <RiyaVoiceCall userId={user.id} />
-        ) : (
-          <div className="text-muted-foreground">Loading user…</div>
-        )}
+      <div 
+        className="flex flex-col w-full relative overflow-hidden"
+        style={{ height: '100vh' }}
+      >
+        {/* iPhone-Style iOS Gradient Background */}
+        <div 
+          className="absolute inset-0"
+          style={{
+            background: 'linear-gradient(180deg, #1a1a2e 0%, #2d1b4e 30%, #4a2c6a 60%, #6b3d8a 100%)',
+          }}
+        />
+        
+        {/* Subtle Radial Glow for Depth */}
+        <div 
+          className="absolute inset-0 opacity-40"
+          style={{
+            background: 'radial-gradient(circle at 50% 30%, rgba(236, 72, 153, 0.15) 0%, transparent 60%)',
+          }}
+        />
+        
+        {/* Content Container */}
+        <div className="relative z-10 flex flex-col h-full w-full items-center justify-center">
+          {user?.id ? (
+            <RiyaVoiceCall userId={user.id} />
+          ) : (
+            <div className="text-white/80 text-lg font-light">Loading user…</div>
+          )}
+        </div>
       </div>
     );
   }

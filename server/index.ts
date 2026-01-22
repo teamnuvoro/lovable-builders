@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import { setupVite, serveStatic, log } from "./vite";
 import { Server } from "http";
+import path from "path";
 import { WebSocketServer, WebSocket as WS } from "ws";
 import { ensureSecretsLoaded } from "./secrets";
 import { getSarvamSTTWebSocketUrl, getSarvamTTSWebSocketUrl } from "./services/sarvam";
@@ -20,13 +21,13 @@ import messagesHistoryRoutes from "./routes/messages-history";
 import analyticsRoutes from "./routes/analytics-events";
 import reminderRoutes from "./routes/reminders";
 import imageRoutes from "./routes/images";
+import bolnaRoutes from "./routes/bolna";
+import vapiTtsRoutes from "./routes/vapi-tts";
 import { initializeReminderScheduler } from "./jobs/reminder-scheduler";
-import { createClient } from "@deepgram/sdk";
+import { runProductionSafetyChecks } from "./utils/productionChecks";
 
 const app = express();
 
-// Initialize Deepgram (Optional now, as Vapi handles this)
-const deepgram = createClient(process.env.DEEPGRAM_API_KEY || '');
 
 // =====================================================
 // HEALTH CHECKS - MUST BE FIRST (before ANY middleware)
@@ -41,7 +42,10 @@ app.get("/", (_req, res) => {
   res.status(200).json({ status: "ok", service: "riya-ai" });
 });
 
-// CORS - Allow requests from frontend (including ngrok for local HTTPS testing)
+// =====================================================
+// CORS CONFIGURATION - MUST BE BEFORE BODY PARSERS
+// =====================================================
+// Properly configured CORS with all required methods and headers
 app.use(cors({
   origin: [
     'http://localhost:3001', // Frontend port
@@ -54,13 +58,54 @@ app.use(cors({
     process.env.NGROK_URL || 'https://prosurgical-nia-carpingly.ngrok-free.dev'
   ].filter(Boolean), // Remove any undefined values
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  exposedHeaders: ['Content-Type', 'Content-Length'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+// Note: CORS middleware automatically handles OPTIONS preflight requests
 
-// Middleware (after health checks)
+// Serve static files from public folder (for audio storage)
+app.use('/audio', express.static(path.join(process.cwd(), 'public/audio')));
+
+// Content Security Policy (CSP) - Required for Vapi WebRTC
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: https://*.vapi.ai https://*.daily.co https://*.m.str.chat; script-src-elem 'self' 'unsafe-eval' 'unsafe-inline' blob: https://*.vapi.ai https://*.daily.co https://*.m.str.chat; worker-src blob:; connect-src * blob: wss:; media-src blob: https://*.daily.co https://*.vapi.ai; frame-src https://*.vapi.ai https://*.daily.co;"
+  );
+  next();
+});
+
+// =====================================================
+// SECRETS LOADING
+// =====================================================
 app.use(ensureSecretsLoaded);
-app.use(express.json());
+
+// =====================================================
+// BODY PARSING - ROUTE-SPECIFIC MIDDLEWARE
+// =====================================================
+// CRITICAL: Different body parsers for different routes
+// - /api/* routes need express.json() for JSON payloads
+// - /vapi/tts needs express.raw() to handle Vapi streams without parsing
+// This prevents "stream is not readable" errors
+
+// Apply express.json() ONLY to /api/* routes (except webhook which needs raw body)
+// IMPORTANT: Webhook route needs raw body for signature verification
+app.use('/api', (req, res, next) => {
+  // Skip JSON parsing for webhook route - it needs raw body
+  if (req.path === '/payment/webhook') {
+    return express.raw({ type: 'application/json', limit: '10mb' })(req, res, next);
+  }
+  // All other /api/* routes use JSON parsing
+  return express.json()(req, res, next);
+});
+
+// Apply express.raw() ONLY to /vapi/* routes (for TTS endpoint)
+app.use('/vapi', express.raw({ type: "*/*", limit: "20mb" }));
+
+// URL encoded form data (for any routes that need it)
 app.use(express.urlencoded({ extended: false }));
 
 // Layer 1: The "Cache Killer" - Middleware to prevent static cache leaks
@@ -87,6 +132,7 @@ app.get("/api/health/detailed", (req, res) => {
       CASHFREE_ID: !!process.env.CASHFREE_APP_ID,
       AMPLITUDE_KEY: !!process.env.VITE_AMPLITUDE_API_KEY,
       DEEPGRAM_KEY: !!process.env.DEEPGRAM_API_KEY,
+      BOLNA_KEY: !!process.env.BOLNA_API_KEY,
     },
     timestamp: new Date().toISOString()
   });
@@ -129,6 +175,12 @@ app.use(reminderRoutes);
 
 // Image management routes (chat images)
 app.use(imageRoutes);
+
+// Bolna AI routes
+app.use(bolnaRoutes);
+
+// Vapi Custom TTS Route
+app.use(vapiTtsRoutes);
 
 // Update user personality endpoint
 app.patch("/api/user/personality", async (req, res) => {

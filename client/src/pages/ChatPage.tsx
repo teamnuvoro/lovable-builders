@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { type Message, type Session } from "@shared/schema";
 import { ChatMessages } from "@/components/chat/ChatMessages";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { ChatHeader } from "@/components/chat/ChatHeader";
 import { PaywallSheet } from "@/components/paywall/PaywallSheet";
 import { AmplitudePasswordModal } from "@/components/AmplitudePasswordModal";
 import { ExitIntentModal } from "@/components/ExitIntentModal";
@@ -40,6 +41,7 @@ export default function ChatPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<string>("");
   const [paywallOpen, setPaywallOpen] = useState(false);
+  const [paywallManuallyClosed, setPaywallManuallyClosed] = useState(false);
   const [amplitudePasswordOpen, setAmplitudePasswordOpen] = useState(false);
 
   // Exit intent detection - triggers when user tries to leave
@@ -437,7 +439,10 @@ export default function ChatPage() {
         // Use POST endpoint which returns premium status
         const res = await apiRequest("POST", "/api/user/usage", { userId: user?.id });
         const data = await res.json();
-        console.log('🔄 User usage fetched:', data);
+        // Only log if premium status changed or on first load
+        if (data?.premiumUser) {
+          console.log('🔄 User usage fetched:', { premiumUser: data.premiumUser, subscriptionPlan: data.subscriptionPlan });
+        }
         return data;
       } catch (error) {
         console.error('Error fetching user usage:', error);
@@ -445,15 +450,16 @@ export default function ChatPage() {
       }
     },
     enabled: !!user?.id, // Only fetch when user is available
-    staleTime: 30000, // Cache for 30 seconds
+    staleTime: 10000, // Consider data fresh for 10 seconds
+    cacheTime: 30000, // Cache for 30 seconds
     refetchOnMount: true,
+    refetchOnWindowFocus: true, // Refetch when window regains focus
     // Only poll if user is NOT premium (to catch upgrade after payment)
-    // Use function to check current data state
     refetchInterval: (query) => {
       const data = query.state.data;
-      const isPremium = data?.premiumUser || user?.premium_user || false;
-      // Stop polling if premium, otherwise poll every 10 seconds
-      return isPremium ? false : 10000;
+      const isPremium = data?.premiumUser === true;
+      // Stop polling if premium, otherwise poll every 15 seconds
+      return isPremium ? false : 15000;
     },
   });
 
@@ -473,9 +479,12 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFromPayment]); // Only depend on isFromPayment to prevent infinite loops
 
-  // Poll for premium status updates (in case payment was processed)
-  // Note: This is now handled by refetchInterval in the useQuery above
-  // Keeping this empty to avoid conflicts
+  // Force refresh premium status on mount only (polling handled by useQuery)
+  useEffect(() => {
+    // Immediately invalidate and refetch usage to get fresh premium status on mount
+    queryClient.invalidateQueries({ queryKey: ["/api/user/usage"] });
+    refetchUsage();
+  }, [user?.id]); // Only run when user changes, not continuously
 
   const quickReplies = [
     "Mera current relationship confusing hai",
@@ -528,9 +537,11 @@ export default function ChatPage() {
   // Fall back to local count only if backend is unavailable (0 or invalid)
   const currentCount = backendCount > 0 ? backendCount : localCount;
 
-  // Check premium status - prioritize user object (from auth) as it's the source of truth
-  // Only use userUsage if user object is not available
-  const isPremium = user?.premium_user === true ? true : (userUsage?.premiumUser === true);
+  // Check premium status - ONLY use API response from /api/user/usage (which checks Cashfree subscriptions)
+  // DO NOT use user?.premium_user from AuthContext as it may be stale/old data
+  // Premium status must come from active Cashfree subscriptions only
+  // STRICT CHECK: Only premium if BOTH premiumUser is true AND subscriptionPlan is defined
+  const isPremium = (userUsage?.premiumUser === true) && (userUsage?.subscriptionPlan !== undefined);
   
   // Debug logging
   useEffect(() => {
@@ -554,10 +565,18 @@ export default function ChatPage() {
     console.log("------------------------------------------");
   }, [localCount, backendCount, currentCount, isPremium, messages.length]);
 
+  // Disable body scroll on chat page (only messages should scroll)
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, []);
+
   // STRICT LIMIT CHECK - Only block if NOT premium AND limit reached
   // For premium users, always allow (unlimited)
-  // Free users get 1000 messages
-  const FREE_MESSAGE_LIMIT = 1000;
+  // Free users get 20 messages
+  const FREE_MESSAGE_LIMIT = 20;
   const isLimitReached = !isPremium && currentCount >= FREE_MESSAGE_LIMIT;
   
   // Debug limit check
@@ -566,9 +585,26 @@ export default function ChatPage() {
       isPremium,
       currentCount,
       isLimitReached,
-      message: isLimitReached ? '🚫 BLOCKED' : '✅ ALLOWED'
+      message: isLimitReached ? '🚫 BLOCKED' : '✅ ALLOWED',
+      userUsage: userUsage
     });
-  }, [isPremium, currentCount, isLimitReached]);
+  }, [isPremium, currentCount, isLimitReached, userUsage]);
+
+  // Automatically show paywall when limit is reached (only once per limit state)
+  useEffect(() => {
+    if (isLimitReached && !paywallOpen && !paywallManuallyClosed) {
+      console.log('💰 Auto-showing paywall - limit reached:', currentCount, '/', FREE_MESSAGE_LIMIT);
+      setPaywallOpen(true);
+      setPaywallManuallyClosed(false); // Reset when limit state changes
+    }
+  }, [isLimitReached, paywallOpen, currentCount, paywallManuallyClosed]);
+
+  // Reset manually closed flag when limit state changes (user might have upgraded)
+  useEffect(() => {
+    if (!isLimitReached) {
+      setPaywallManuallyClosed(false);
+    }
+  }, [isLimitReached]);
 
   // Smart trigger: Open feedback modal 10 seconds after paywall is hit
   useEffect(() => {
@@ -878,10 +914,12 @@ export default function ChatPage() {
       ? rawBackendCount 
       : 0;
     const effectiveCount = validatedBackendCount > 0 ? validatedBackendCount : currentLocal;
-    const isPremiumUser = userUsage?.premiumUser || user?.premium_user || false;
+    // ONLY use API response for premium status (checks Cashfree subscriptions)
+    // DO NOT use user?.premium_user as it may be stale
+    const isPremiumUser = userUsage?.premiumUser === true;
 
     if (!isPremiumUser && effectiveCount >= FREE_MESSAGE_LIMIT) {
-      console.log("Paywall Hit (Pre-check):", effectiveCount);
+      console.log("💰 Paywall Hit (Pre-check):", effectiveCount, "Limit:", FREE_MESSAGE_LIMIT);
       setPaywallOpen(true);
       return;
     }
@@ -899,13 +937,13 @@ export default function ChatPage() {
       voiceMode: voiceModeEnabled
     });
 
-    // 4. Double check AFTER increment (for the 1000th message edge case)
+    // 4. Double check AFTER increment (for the 20th message edge case)
     if (!isPremiumUser && newCount >= FREE_MESSAGE_LIMIT) {
-      console.log("Paywall Hit (Post-increment):", newCount);
-      // We allow THIS message to send (as the 1000th), but open modal for next.
-      // Or block immediately if you prefer strictness.
-      // Let's let the 1000th go through, but trigger state for UI lock.
+      console.log("💰 Paywall Hit (Post-increment):", newCount, "Limit:", FREE_MESSAGE_LIMIT);
+      // Block immediately - don't allow the message to send
       setPaywallOpen(true);
+      removeOptimisticMessage(optimisticMsg.id);
+      return;
     }
 
     sendMessageMutation.mutate({
@@ -1012,15 +1050,36 @@ export default function ChatPage() {
 }
 
   return (
-    <div className="flex flex-col h-screen w-full bg-white overflow-hidden relative">
+    <div 
+      className="flex flex-col w-full bg-white overflow-hidden"
+      style={{ height: '100dvh' }}
+    >
       {/* Exit Intent Modal */}
       <ExitIntentModal
         isOpen={showExitModal}
         onClose={closeExitModal}
       />
 
-      {/* Scrollable Messages Area - Takes full height minus navbar and input */}
-      <div className="flex-1 min-h-0 w-full overflow-hidden pt-[60px]">
+      {/* Chat Header - Fixed at top */}
+      <div className="flex-shrink-0 z-40">
+        <ChatHeader
+          sessionId={session?.id}
+          voiceModeEnabled={voiceModeEnabled}
+          onVoiceModeToggle={() => setVoiceModeEnabled(!voiceModeEnabled)}
+          onPaymentClick={() => setPaywallOpen(true)}
+          onOpenPaywall={() => setPaywallOpen(true)}
+          userUsage={userUsage}
+        />
+      </div>
+
+      {/* Scrollable Messages Area - ONLY scrollable element */}
+      <div 
+        className="flex-1 min-h-0 w-full overflow-y-auto"
+        style={{
+          overscrollBehavior: 'contain',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
         <ChatMessages
           messages={displayMessages as Message[]}
           isLoading={isMessagesLoading}
@@ -1029,8 +1088,13 @@ export default function ChatPage() {
         />
       </div>
 
-      {/* Fixed Input at Bottom */}
-      <div className="flex-shrink-0 w-full z-20 bg-white border-t border-gray-100">
+      {/* Fixed Input at Bottom - Always visible */}
+      <div 
+        className="flex-shrink-0 w-full bg-white border-t border-gray-100 shadow-sm"
+        style={{
+          paddingBottom: 'env(safe-area-inset-bottom, 0)',
+        }}
+      >
         <ChatInput
           onSendMessage={handleSendMessage}
           isLoading={sendMessageMutation.isPending || isTyping}
@@ -1041,11 +1105,14 @@ export default function ChatPage() {
         />
       </div>
 
-      {/* Floating Call Button - Right side, above input bar */}
+      {/* Floating Call Button - Positioned above input bar */}
       <Link href="/call">
         <button
-          className="fixed right-4 bottom-28 w-14 h-14 rounded-full flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-110 active:scale-95 transition-all duration-300 z-30"
-          style={{ backgroundColor: '#FF69B4' }}
+          className="fixed right-4 w-14 h-14 rounded-full flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-110 active:scale-95 transition-all duration-300 z-30"
+          style={{ 
+            backgroundColor: '#FF69B4',
+            bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
+          }}
           title="Call Riya"
           data-testid="button-floating-call"
         >
@@ -1053,8 +1120,19 @@ export default function ChatPage() {
         </button>
       </Link>
 
-      <PaywallSheet open={paywallOpen} onOpenChange={setPaywallOpen} />
-
+      <PaywallSheet 
+        open={paywallOpen} 
+        onOpenChange={(open) => {
+          console.log('💰 PaywallSheet open state changed:', open);
+          setPaywallOpen(open);
+          // If user manually closes the paywall, mark it as manually closed
+          // This prevents the auto-open effect from immediately reopening it
+          if (!open && isLimitReached) {
+            setPaywallManuallyClosed(true);
+          }
+        }} 
+        messageCount={userUsage?.messageCount}
+      />
     </div>
   );
 }

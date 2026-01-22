@@ -13,7 +13,7 @@ export function getRazorpayPlanConfig() {
   return {
     currency: "INR",
     plans: {
-      daily: 19,   // ₹19 = 1900 paise
+      daily: 29,   // ₹29 = 2900 paise
       weekly: 49, // ₹49 = 4900 paise
     },
   };
@@ -57,9 +57,29 @@ export function getCashfreePlanConfig() {
   return {
     currency: "INR",
     plans: {
-      daily: 19,
-      weekly: 49,
+      daily: 29,  // ₹29 for daily pass
+      weekly: 49, // ₹49 for weekly pass
     },
   };
 }
 
+// =====================================================
+// DODO PAYMENTS CONFIGURATION
+// =====================================================
+
+export function getDodoPlanConfig() {
+  return {
+    currency: "INR",
+    plans: {
+      monthly: 99,  // ₹99 per month
+    },
+  };
+}
+
+export function getDodoCredentials() {
+  return {
+    apiKey: (process.env.DODO_PAYMENTS_API_KEY ?? "").trim(),
+    webhookSecret: (process.env.DODO_WEBHOOK_SECRET ?? "").trim(),
+    environment: process.env.DODO_ENV === 'live_mode' ? 'live_mode' : 'test_mode',
+  };
+}

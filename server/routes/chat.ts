@@ -245,29 +245,11 @@ router.post("/api/session", async (req: Request, res: Response) => {
       });
     }
 
-    // Handle backdoor user ID (not a valid UUID) - skip database queries
-    if (userId === 'backdoor-user-id' || userId === '00000000-0000-0000-0000-000000000001') {
-      console.log(`[POST /api/session] Backdoor user detected: ${userId} - creating dev session`);
-      const devSessionId = crypto.randomUUID();
-      return res.json({
-        id: devSessionId,
-        user_id: userId,
-        type: 'chat',
-        started_at: new Date().toISOString()
-      });
-    }
-
     // Validate UUID format
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(userId)) {
-      console.warn(`[POST /api/session] Invalid UUID format: ${userId} - creating dev session`);
-      const devSessionId = crypto.randomUUID();
-      return res.json({
-        id: devSessionId,
-        user_id: userId,
-        type: 'chat',
-        started_at: new Date().toISOString()
-      });
+      console.warn(`[POST /api/session] Invalid UUID format: ${userId}`);
+      return res.status(400).json({ error: 'Invalid user ID' });
     }
 
     // CRITICAL: Always check for sessions with messages FIRST (including ended sessions)
@@ -381,12 +363,6 @@ router.get("/api/messages", async (req: Request, res: Response) => {
     const userId = req.query.userId as string; // Optional: for fallback
 
     if (!sessionId) {
-      return res.json([]);
-    }
-
-    // Handle backdoor user - return empty messages (they can't have saved messages in database)
-    if (userId === 'backdoor-user-id' || userId === '00000000-0000-0000-0000-000000000001') {
-      console.log(`[GET /api/messages] Backdoor user detected: ${userId} - returning empty messages`);
       return res.json([]);
     }
 

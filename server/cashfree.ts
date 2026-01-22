@@ -165,9 +165,11 @@ export async function createCashfreeOrder(params: CreateOrderParams): Promise<Ca
       },
     };
 
-    if (process.env.CASHFREE_WEBHOOK_URL) {
-      payload.order_meta.notify_url = process.env.CASHFREE_WEBHOOK_URL;
-    }
+    // Always set webhook URL - use explicit env var or construct from base URL
+    const webhookUrl = process.env.CASHFREE_WEBHOOK_URL || 
+      `${process.env.NGROK_URL || process.env.BASE_URL || process.env.VERCEL_URL || 'http://localhost:8080'}/api/payment/webhook`;
+    payload.order_meta.notify_url = webhookUrl;
+    console.log('[Cashfree] Webhook URL set to:', webhookUrl);
 
     const requestUrl = `${getBaseUrl()}/orders`;
     const requestHeaders = getHeaders({ "Content-Type": "application/json" });
@@ -216,7 +218,37 @@ export async function createCashfreeOrder(params: CreateOrderParams): Promise<Ca
       throw new Error(errorMessage);
     }
 
-    return await response.json();
+    // GOLDEN PROMPT: Parse response and log in standard format
+    const responseText = await response.text();
+    
+    let responseData: any;
+    try {
+      responseData = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('[CASHFREE][RAW_RESPONSE] ❌ Failed to parse JSON');
+      console.error('[CASHFREE][RAW_RESPONSE]', responseText);
+      throw new Error('Invalid JSON response from Cashfree');
+    }
+    
+    // GOLDEN PROMPT: Logging format
+    console.log("[CASHFREE][RAW_RESPONSE]");
+    console.log(JSON.stringify(responseData, null, 2));
+    
+    // GOLDEN PROMPT: Check for corruption in raw response (for support escalation)
+    if (responseData.payment_session_id) {
+      const sessionId = responseData.payment_session_id;
+      console.log("[CASHFREE][SESSION]");
+      console.log("  value=" + sessionId.substring(0, 50) + "...");
+      console.log("  length=" + sessionId.length);
+      
+      // Check if corruption exists in raw response
+      if (responseText.includes('paymentpayment')) {
+        console.error('[CASHFREE][SESSION] ❌ CORRUPTION DETECTED IN RAW RESPONSE');
+        console.error('[CASHFREE][SESSION] This is a Cashfree API bug - escalate to support');
+      }
+    }
+    
+    return responseData;
   } catch (error: any) {
     // Don't wrap the error if it's already a meaningful Error object
     if (error instanceof Error && error.message) {

@@ -9,7 +9,6 @@ import {
   Crown,
   BarChart3,
   MessageCircle,
-  Heart,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
@@ -132,18 +131,8 @@ export function TopNavbar() {
           </div>
         </div>
 
-        {/* Right: Credits and Actions */}
+        {/* Right: Actions */}
         <div className="flex items-center gap-3">
-          {/* ₹200 Left with heart icon */}
-          {isChatPage && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-white font-semibold text-sm">
-                ₹{typeof remainingCredits === 'number' ? remainingCredits : '200'} Left
-              </span>
-              <Heart className="w-4 h-4 text-white fill-white" />
-            </div>
-          )}
-
           {/* Voice Call Button */}
           <Link href="/call">
             <button

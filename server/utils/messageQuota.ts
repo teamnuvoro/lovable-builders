@@ -38,10 +38,15 @@ export async function checkMessageQuota(
     }
 
     // ===== CHECK PREMIUM STATUS (NEW OR OLD SCHEMA) =====
-    // If user has premium_user = true OR subscription_tier = 'daily'/'weekly', allow unlimited
-    const isPremium = user.premium_user === true || 
+    // If user has premium_user = true OR subscription_tier = 'daily'/'weekly'/'monthly', allow unlimited
+    // Also check if subscription hasn't expired
+    const now = new Date();
+    const isExpired = user.subscription_expiry ? new Date(user.subscription_expiry) < now : false;
+    const isPremium = (user.premium_user === true && !isExpired) || 
                      user.subscription_tier === 'daily' || 
-                     user.subscription_tier === 'weekly';
+                     user.subscription_tier === 'weekly' ||
+                     user.subscription_tier === 'monthly' ||
+                     user.subscription_plan === 'monthly';
 
     console.log(`[Message Quota] User ${userId} premium check:`, {
       premium_user: user.premium_user,

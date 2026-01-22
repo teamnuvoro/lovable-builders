@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { createCashfreeOrder, verifyCashfreeSignature } from '../cashfree';
+import { createDodoCheckoutSession, verifyDodoWebhook } from '../services/dodo';
 import { supabase, isSupabaseConfigured } from '../supabase';
-import { getCashfreePlanConfig, getCashfreeBaseUrl } from '../config';
+import { getDodoPlanConfig } from '../config';
 import crypto from 'crypto';
+import { IS_PRODUCTION, validateUserIdForProduction, isBackdoorUserAllowed } from '../utils/productionChecks';
 
 const router = Router();
 const DEV_USER_ID = '00000000-0000-0000-0000-000000000001';
@@ -53,8 +54,18 @@ async function logPaymentEvent(userId: string | undefined, eventType: string, tr
 // Get payment configuration
 router.get('/api/payment/config', async (_req: Request, res: Response) => {
   try {
-    const config = getCashfreePlanConfig();
-    res.json(config);
+    const config = getDodoPlanConfig();
+    const enablePaymentsInDev = process.env.ENABLE_PAYMENTS_IN_DEV === 'true';
+    const paymentsEnabled = IS_PRODUCTION || enablePaymentsInDev;
+    
+    res.json({
+      ...config,
+      paymentsEnabled,
+      paymentProvider: 'dodo',
+      paymentsDisabledReason: paymentsEnabled
+        ? undefined
+        : 'Payments are disabled in development mode. Set ENABLE_PAYMENTS_IN_DEV=true to enable.',
+    });
   } catch (error: any) {
     console.error('[Payment Config] Error:', error);
     res.status(500).json({ error: 'Failed to get payment config' });
@@ -64,93 +75,91 @@ router.get('/api/payment/config', async (_req: Request, res: Response) => {
 // Create payment order
 router.post('/api/payment/create-order', async (req: Request, res: Response) => {
   try {
-    const { planType, userId: reqUserId } = req.body;
-    // Prefer session user, fallback to request body (if auth middleware issue), then dev user
-    const userId = (req as any).session?.userId || reqUserId || DEV_USER_ID;
-
-    // 🎭 MOCK MODE: Bypass Cashfree entirely for local testing
-    if (process.env.MOCK_PAYMENTS === 'true') {
-      console.log('🎭 [MOCK MODE] Creating mock payment order');
-      const plans = { daily: 19, weekly: 49 };
-      const amount = plans[planType];
-      const orderId = `mock_order_${Date.now()}_${userId.slice(0, 8)}`;
-
-      if (isSupabaseConfigured) {
-        const startDate = new Date();
-        const endDate = new Date();
-        endDate.setDate(endDate.getDate() + (planType === 'weekly' ? 7 : 1));
-
-        // Create subscription as active immediately
-        await supabase.from('subscriptions').insert({
-          user_id: userId,
-          plan_type: planType,
-          amount: amount,
-          currency: 'INR',
-          status: 'active',
-          cashfree_order_id: orderId,
-          started_at: startDate.toISOString(),
-          expires_at: endDate.toISOString(),
-          created_at: new Date().toISOString(),
-        });
-
-        // Create payment record
-        await supabase.from('payments').insert({
-          user_id: userId,
-          amount: amount,
-          currency: 'INR',
-          cashfree_order_id: orderId,
-          status: 'success',
-          payment_method: 'mock',
-          created_at: new Date().toISOString(),
-        });
-      }
-
-      return res.json({
-        order_id: orderId,
-        payment_session_id: `mock_session_${orderId}`,
-        amount,
-        currency: 'INR',
-        planType,
-        mock: true,
+    // 🚫 CLEAN DEV MODE: Disable payments in development (unless explicitly enabled)
+    // This prevents confusion from mixing dev auth with prod payments
+    const enablePaymentsInDev = process.env.ENABLE_PAYMENTS_IN_DEV === 'true';
+    if (!IS_PRODUCTION && !enablePaymentsInDev) {
+      console.log('🚫 [Payment] Payments disabled in dev mode');
+      return res.status(400).json({
+        error: 'Payments are disabled in development mode',
+        message: 'To test payments, use production mode with real user authentication',
+        devNote: 'Set NODE_ENV=production and use real UUID users to test payments, or set ENABLE_PAYMENTS_IN_DEV=true to enable in dev mode'
       });
     }
 
-    // ✅ PRODUCTION CREDENTIALS (Load from environment variables)
-    console.log("🔑 Using Production Cashfree Keys from environment");
-    // Keys should be set in .env file, not hardcoded
-    if (!process.env.CASHFREE_APP_ID || !process.env.CASHFREE_SECRET_KEY) {
-      console.warn("⚠️ Cashfree keys not found in environment variables");
+    const { planType = 'monthly', userId: reqUserId } = req.body;
+    
+    // Validate plan type
+    if (planType !== 'monthly') {
+      return res.status(400).json({ 
+        error: 'Invalid plan type. Only monthly plan is available.' 
+      });
     }
-    process.env.CASHFREE_ENV = process.env.CASHFREE_ENV || "PRODUCTION";
+    // Prefer session user, fallback to request body (if auth middleware issue), then dev user
+    const userId = (req as any).session?.userId || reqUserId || DEV_USER_ID;
+    
+    // Validate userId is present
+    if (!userId) {
+      console.error('❌ [Payment] No userId provided in request');
+      return res.status(400).json({ 
+        error: 'User authentication required. Please login to continue.' 
+      });
+    }
+    
+    console.log('[Payment] Creating Dodo checkout session for userId:', userId, 'planType:', planType);
 
-    // 1. Log the keys (Masked) to prove they are loaded
-    const appId = process.env.CASHFREE_APP_ID;
-    const secret = process.env.CASHFREE_SECRET_KEY;
-    console.log(`🔑 Loading Keys: AppID ends in ...${appId?.slice(-4)}, Secret exists: ${!!secret}`);
+    // ✅ DODO PAYMENTS - Using official SDK
+    const dodoEnv = process.env.DODO_ENV === 'live_mode' ? 'live_mode' : 'test_mode';
+    if (!IS_PRODUCTION || enablePaymentsInDev) {
+      console.log("🧪 [Payment] Using Dodo test_mode");
+    } else {
+      console.log("🔑 [Payment] Using Dodo live_mode");
+    }
 
-    // 2. Setup Cashfree (Force Production via helper which uses environment vars)
-    // Note: createCashfreeOrder helper automatically uses these env vars
+    // Validate credentials
+    if (!process.env.DODO_PAYMENTS_API_KEY) {
+      const errorMsg = enablePaymentsInDev 
+        ? "Dodo Payments API key not found. Set DODO_PAYMENTS_API_KEY in .env"
+        : "Dodo Payments API key not found in environment variables";
+      console.error(`❌ ${errorMsg}`);
+      return res.status(400).json({
+        error: 'Payment configuration error',
+        message: errorMsg,
+        devNote: enablePaymentsInDev ? 'Get API key from Dodo Payments dashboard' : undefined
+      });
+    }
 
-    // 3. Create Unique Order
+    // Get plan config
+    const planConfig = getDodoPlanConfig();
+    const amount = planConfig.plans.monthly;
     const orderId = `ORDER_${Date.now()}`;
-    const amount = planType === 'weekly' ? 49 : 19;
 
-    // Generate random valid Indian phone (starts with 9, 8, 7, or 6)
-    const randomPhone = '9' + Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
-
-    console.log("🚀 Sending request to Cashfree:", { orderId, amount, phone: randomPhone });
+    console.log("🚀 Creating Dodo checkout session:", { orderId, amount, planType });
 
     // 4. INSERT SUBSCRIPTION RECORD BEFORE CALLING GATEWAY
     // Log Initiation
     await logPaymentEvent(userId, 'PAYMENT_INITIATED', orderId, 200, { planType, amount });
 
-    // This is the critical fix. We must have a record to verify against later.
-    if (isSupabaseConfigured) {
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + (planType === 'weekly' ? 7 : 1));
+    // Validate user ID for production (fail fast if invalid)
+    validateUserIdForProduction(userId, 'payment order creation');
+    
+    const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+    
+    // In production, reject invalid UUIDs (already handled by validateUserIdForProduction, but double-check)
+    if (IS_PRODUCTION && !isValidUUID) {
+      console.error(`❌ Production: Invalid user ID format: ${userId}`);
+      return res.status(400).json({ 
+        error: 'Invalid user ID. Payments require authenticated users with valid accounts.' 
+      });
+    }
 
-      const { error: insertError } = await supabase
+    // This is the critical fix. We must have a record to verify against later.
+        if (isSupabaseConfigured && isValidUUID) {
+          const startDate = new Date();
+          const endDate = new Date();
+          endDate.setMonth(endDate.getMonth() + 1); // Add 1 month
+
+      const { data: insertedSubscription, error: insertError } = await supabase
         .from('subscriptions')
         .insert({
           user_id: userId,
@@ -158,72 +167,185 @@ router.post('/api/payment/create-order', async (req: Request, res: Response) => 
           amount: amount,
           currency: 'INR',
           status: 'pending',
-          cashfree_order_id: orderId,
+          dodo_order_id: orderId, // Dodo Payments order ID
+          cashfree_order_id: null, // Explicitly set to null (migrated to Dodo)
           started_at: startDate.toISOString(),
           expires_at: endDate.toISOString(),
           created_at: new Date().toISOString()
-        });
+        })
+        .select()
+        .single();
 
       if (insertError) {
-        console.error("❌ Failed to insert subscription record:", insertError);
-        throw new Error("Database Error: Could not create subscription record");
+        console.error("❌ Failed to insert subscription record:", {
+          error: insertError,
+          code: insertError.code,
+          message: insertError.message,
+          details: insertError.details,
+          hint: insertError.hint,
+          userId,
+          orderId,
+          planType
+        });
+        
+        // Check for common errors
+        if (insertError.code === '23505') {
+          // Unique constraint violation - subscription might already exist
+          console.warn("⚠️ Subscription might already exist for this order, checking...");
+          const { data: existing } = await supabase
+            .from('subscriptions')
+            .select('*')
+            .eq('dodo_order_id', orderId)
+            .maybeSingle();
+          
+          if (existing) {
+            console.log("✅ Found existing subscription, continuing with order creation");
+            // Continue - subscription already exists
+          } else {
+            throw new Error(`Database Error: Could not create subscription record. ${insertError.message}`);
+          }
+        } else {
+          throw new Error(`Database Error: Could not create subscription record. ${insertError.message || insertError.code || 'Unknown error'}`);
+        }
+      } else {
+        console.log("✅ Pending Subscription Created for User:", userId, "Subscription ID:", insertedSubscription?.id);
       }
-      console.log("✅ Pending Subscription Created for User:", userId);
+    } else if (!isValidUUID && !IS_PRODUCTION) {
+      console.warn(`⚠️ Dev mode: Skipping subscription insert for non-UUID user: ${userId}`);
+      console.warn("⚠️ Payment order will still be created, but subscription won't be tracked in database");
     } else {
-      console.warn("⚠️ Database NOT configured. Skipping subscription insert (Mock Mode).");
+      console.warn("⚠️ Database NOT configured. Skipping subscription insert.");
     }
 
-    // Use ngrok HTTPS URL for local testing, or production domain
-    // Set NGROK_URL in .env (e.g., https://abc123.ngrok-free.app)
-    // Or use production domain if already whitelisted
-    const baseUrl = process.env.NGROK_URL || process.env.BASE_URL || 'http://localhost:8080';
-    console.log('🌐 [Payment] Using returnUrl base:', baseUrl);
-    console.log('🌐 [Payment] NGROK_URL from env:', process.env.NGROK_URL || 'NOT SET');
+    // Determine return URL and webhook URL (must be HTTPS)
+    // PRODUCTION: Require BASE_URL (no ngrok, must be https)
+    // DEVELOPMENT: Require NGROK_URL or BASE_URL (must be https). No localhost fallback.
+    let returnUrlBase: string;
+    let webhookUrlFinal: string;
+    const explicitReturnUrl = process.env.PAYMENT_RETURN_URL;
     
-    const orderData = await createCashfreeOrder({
-      orderId: orderId,
-      orderAmount: amount,
-      orderCurrency: 'INR',
-      customerName: "Riya User",
-      customerEmail: "user@riya.ai",
-      customerPhone: randomPhone,
-      returnUrl: `${baseUrl}/payment/callback?orderId=${orderId}`,
-      customerId: userId
+    const ensureHttps = (url: string) => url.startsWith('https://');
+    
+    if (IS_PRODUCTION) {
+      returnUrlBase = process.env.BASE_URL || '';
+      webhookUrlFinal = process.env.DODO_WEBHOOK_URL || `${returnUrlBase}/api/payment/webhook`;
+      
+      if (!returnUrlBase || !ensureHttps(returnUrlBase)) {
+        console.error('❌ PRODUCTION: BASE_URL must be set and HTTPS');
+        return res.status(500).json({ error: 'Server configuration error. Please contact support.' });
+      }
+      
+      if (returnUrlBase.includes('ngrok')) {
+        console.error('❌ PRODUCTION: BASE_URL cannot be ngrok URL');
+        return res.status(500).json({ error: 'Server configuration error. Please contact support.' });
+      }
+      
+      console.log(`🌐 [Payment] Production mode - Using BASE_URL: ${returnUrlBase}`);
+      console.log(`🌐 [Payment] Webhook URL: ${webhookUrlFinal}`);
+    } else {
+      // DEVELOPMENT
+      const baseUrl = process.env.BASE_URL;
+      const ngrokUrl = process.env.NGROK_URL;
+      const webhookUrl = process.env.DODO_WEBHOOK_URL;
+      
+      if (ngrokUrl) {
+        returnUrlBase = ngrokUrl;
+        console.log(`🌐 [Payment] Dev mode - Using NGROK_URL: ${returnUrlBase}`);
+      } else if (baseUrl) {
+        returnUrlBase = baseUrl;
+        console.log(`🌐 [Payment] Dev mode - Using BASE_URL: ${returnUrlBase}`);
+      } else {
+        console.error('❌ DEV: NGROK_URL or BASE_URL must be set and HTTPS. Localhost is not allowed for Dodo Payments.');
+        return res.status(500).json({ error: 'Payment is misconfigured. Set NGROK_URL (https) for dev.' });
+      }
+      
+      if (!ensureHttps(returnUrlBase)) {
+        console.error('❌ DEV: returnUrlBase must be HTTPS');
+        return res.status(500).json({ error: 'Payment is misconfigured. NGROK_URL/BASE_URL must be https.' });
+      }
+      
+      webhookUrlFinal = webhookUrl || `${returnUrlBase}/api/payment/webhook`;
+      console.log(`🌐 [Payment] Webhook URL: ${webhookUrlFinal}`);
+    }
+    
+    // Final return URL (HTTPS only)
+    const computedReturnUrl = explicitReturnUrl && ensureHttps(explicitReturnUrl)
+      ? explicitReturnUrl
+      : `${returnUrlBase}/payment/return`;
+    
+    if (!ensureHttps(computedReturnUrl)) {
+      console.error('❌ return_url must be HTTPS. Current:', computedReturnUrl);
+      return res.status(500).json({ error: 'Payment return_url must be HTTPS. Please configure PAYMENT_RETURN_URL or NGROK_URL/BASE_URL with https.' });
+    }
+    
+    // Create Dodo checkout session
+    let checkoutSession;
+    try {
+      checkoutSession = await createDodoCheckoutSession({
+        userId,
+        planType,
+        amount,
+        returnUrl: `${computedReturnUrl}?orderId=${orderId}`,
+        orderId: orderId, // Pass orderId so it's included in metadata
+      });
+    } catch (dodoError: any) {
+      console.error("🔥 Dodo Checkout Session Creation Failed:", {
+        error: dodoError.message,
+        stack: dodoError.stack,
+        orderId,
+        amount
+      });
+      throw new Error(`Failed to create checkout session: ${dodoError.message}`);
+    }
+
+    console.log("[DODO][CHECKOUT]");
+    console.log("  order_id=" + orderId);
+    console.log("  env=" + dodoEnv);
+    console.log("  checkout_session_id=" + checkoutSession.checkout_session_id);
+    console.log("  checkout_url=" + checkoutSession.checkout_url);
+    
+    // Return checkout URL for frontend redirect
+    res.json({ 
+      checkout_url: checkoutSession.checkout_url,
+      checkout_session_id: checkoutSession.checkout_session_id,
+      order_id: orderId,
+      session_id: checkoutSession.checkout_session_id, // For compatibility
     });
-
-    // 5. Check if we actually got data
-    const sessionId = orderData.payment_session_id;
-    if (!sessionId) {
-      console.error("❌ Cashfree Response contained no ID:", orderData);
-      throw new Error("Cashfree returned success but NO session ID");
-    }
-
-    // Fail-Safe: Detect Test Keys in Production
-    const currentAppId = process.env.CASHFREE_APP_ID || '';
-    if (currentAppId.toUpperCase().includes('TEST')) {
-      const msg = "CRITICAL CONFIG ERROR: Render is using TEST KEYS but code is set to PRODUCTION. Please update Render Environment Variables immediately.";
-      console.error("🔥 " + msg);
-      throw new Error(msg);
-    }
-
-    // Safety Check: Detect Mock IDs or Sandbox Mode from helper
-    if (process.env.CASHFREE_ENV === 'TEST' || (sessionId.startsWith("session_") && sessionId.length < 30)) {
-      console.error("❌ CRITICAL: Attempted to use Sandbox/Mock Session ID in Production Flow:", sessionId);
-      throw new Error("SERVER MISCONFIGURATION: Server is in TEST mode but Payment is in PRODUCTION. Update your Render Environment Variables.");
-    }
-
-    console.log("✅ Session ID Generated:", sessionId);
-
-    res.json({ payment_session_id: sessionId, order_id: orderId }); // Return order_id too just in case
 
   } catch (error: any) {
     // 🛑 CAPTURE THE REAL ERROR
     const internalMessage = error.message;
-    console.error("🔥 FATAL ERROR:", internalMessage);
+    const errorStack = error.stack;
+    console.error("🔥 FATAL ERROR in payment order creation:", {
+      message: internalMessage,
+      stack: errorStack,
+      error: error,
+      userId: (req as any).session?.userId || req.body.userId,
+      planType: req.body.planType,
+    });
 
-    res.status(500).json({
+    // Provide more helpful error messages
+    let userFriendlyMessage = internalMessage;
+    let statusCode = 500;
+    
+    if (internalMessage.includes('Dodo Payments') || internalMessage.includes('DODO_PAYMENTS')) {
+      userFriendlyMessage = 'Payment gateway configuration error. Please contact support.';
+    } else if (internalMessage.includes('authentication')) {
+      userFriendlyMessage = 'Payment gateway authentication failed. Please contact support.';
+    } else if (internalMessage.includes('Database Error')) {
+      userFriendlyMessage = 'Unable to create payment order. Please try again.';
+    } else if (internalMessage.includes('NGROK_URL') || internalMessage.includes('BASE_URL') || internalMessage.includes('HTTPS')) {
+      userFriendlyMessage = 'Payment configuration error. Please contact support.';
+      statusCode = 500;
+    } else if (internalMessage.includes('User authentication required')) {
+      userFriendlyMessage = 'Please login to continue with payment.';
+      statusCode = 401;
+    }
+
+    res.status(statusCode).json({
       error: true,
-      details: internalMessage
+      details: userFriendlyMessage,
+      internalError: process.env.NODE_ENV === 'development' ? internalMessage : undefined
     });
   }
 });
@@ -307,92 +429,54 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Order ID is required' });
     }
 
-    // 🎭 MOCK MODE: Always return success for mock payments
-    if (process.env.MOCK_PAYMENTS === 'true') {
-      console.log('🎭 [MOCK MODE] Verifying mock payment:', orderId);
-      
-      if (isSupabaseConfigured) {
-        // Get payment and subscription
-        const { data: payment } = await supabase
-          .from('payments')
-          .select('*, subscriptions(*)')
-          .eq('cashfree_order_id', orderId)
-          .eq('user_id', userId)
-          .single();
-
-        if (payment && payment.status === 'success') {
-          const subscription = payment.subscriptions?.[0];
-          const planType = subscription?.plan_type || 'daily';
-          
-          // Ensure user is upgraded (triggers should handle this, but double-check)
-          const { data: user } = await supabase
-            .from('users')
-            .select('premium_user, subscription_plan')
-            .eq('id', userId)
-            .single();
-
-          // If user is not premium yet, manually upgrade (triggers might not have fired)
-          if (user && !user.premium_user) {
-            console.log('🎭 [MOCK MODE] User not premium yet, manually upgrading...');
-            console.log('🎭 [MOCK MODE] User ID:', userId);
-            console.log('🎭 [MOCK MODE] Plan Type:', planType);
-            
-            const { data: updatedUser, error: updateError } = await supabase
-              .from('users')
-              .update({
-                premium_user: true,
-                subscription_plan: planType,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', userId)
-              .select()
-              .single();
-            
-            if (updateError) {
-              console.error('❌ [MOCK MODE] Failed to upgrade user:', updateError);
-            } else {
-              console.log('✅ [MOCK MODE] User upgraded to premium!', updatedUser);
-            }
-          } else if (user && user.premium_user) {
-            console.log('✅ [MOCK MODE] User is already premium');
-          } else {
-            console.log('⚠️ [MOCK MODE] User not found:', userId);
-          }
-
-          return res.json({
-            success: true,
-            orderId,
-            planType,
-            endDate: subscription?.expires_at,
-            mock: true,
-          });
-        }
-      }
-
-      return res.json({
-        success: true,
-        orderId,
-        planType: 'daily',
-        mock: true,
-      });
-    }
+    // ✅ REAL PAYMENTS ONLY - Verify with Cashfree API
+    // No mock mode - all payments must go through Cashfree
 
     // Get order from database
     if (!isSupabaseConfigured) {
       return res.status(503).json({ error: 'Database not configured' });
     }
 
-    const { data: subscription, error: fetchError } = await supabase
+    // Validate user ID for production (fail fast if invalid)
+    validateUserIdForProduction(userId, 'payment verification');
+    
+    const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+    
+    // In production, reject invalid UUIDs (already handled by validateUserIdForProduction, but double-check)
+    if (IS_PRODUCTION && !isValidUUID) {
+      console.error(`❌ Production: Invalid user ID format: ${userId}`);
+      return res.status(400).json({ 
+        error: 'Invalid user ID. Payments require authenticated users with valid accounts.' 
+      });
+    }
+    
+    let subscription = null;
+    let planType = 'daily'; // Default plan type for backdoor users (dev only)
+    
+    if (isValidUUID) {
+      const { data: subData, error: fetchError } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('cashfree_order_id', orderId)
       .single();
 
-    if (fetchError || !subscription) {
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        console.error('[Payment Verify] Error fetching subscription:', fetchError);
+        return res.status(500).json({ error: 'Failed to fetch subscription', details: fetchError.message });
+      }
+      
+      subscription = subData;
+      if (subscription) {
+        planType = subscription.plan_type || 'daily';
+      }
+    } else if (!IS_PRODUCTION && isBackdoorUserAllowed(userId)) {
+      console.warn(`[Payment Verify] Dev mode: Backdoor user ${userId} - skipping subscription lookup`);
+    }
+
+    if (!subscription && isValidUUID) {
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    // Check payment status with Cashfree
     // Check payment status with Cashfree
     const cashfreeBaseUrl = getCashfreeBaseUrl();
 
@@ -421,8 +505,10 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
     const isPaid = paymentStatus === 'PAID' || paymentStatus === 'ACTIVE' || paymentStatus === 'SUCCESS';
     
     // Also check if subscription is already marked as active (webhook might have processed it)
-    const isAlreadyActive = subscription.status === 'active';
+    const isAlreadyActive = subscription?.status === 'active';
 
+    // Only update database if we have a valid subscription record (valid UUID user)
+    if (subscription && isValidUUID) {
     await supabase
       .from('subscriptions')
       .update({
@@ -431,16 +517,18 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
         updated_at: new Date().toISOString()
       })
       .eq('cashfree_order_id', orderId);
+    }
 
     // Update user premium status if paid OR if subscription is already active
-    if (isPaid || isAlreadyActive) {
+    // Only for valid UUID users (skip for backdoor users)
+    if ((isPaid || isAlreadyActive) && isValidUUID && subscription) {
       // Calculate expiry
       const now = new Date();
       let expiry = new Date();
-      if (subscription.plan_type === 'weekly') {
-        expiry.setDate(expiry.getDate() + 7);
+      if (subscription.plan_type === 'monthly') {
+        expiry.setMonth(expiry.getMonth() + 1);
       } else {
-        // Daily
+        // Fallback for old plan types
         expiry.setTime(expiry.getTime() + 24 * 60 * 60 * 1000);
       }
 
@@ -512,14 +600,18 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
     // Return success if payment is paid OR subscription is already active
     const success = isPaid || isAlreadyActive;
     
+    // For backdoor users (dev only), return success if payment is paid (even without subscription record)
+    // In production, all users must have valid UUIDs and subscriptions
+    const finalSuccess = (IS_PRODUCTION || isValidUUID) ? success : (isBackdoorUserAllowed(userId) ? isPaid : false);
+    
     res.json({
-      success: success,
+      success: finalSuccess,
       status: paymentStatus,
       orderId,
-      planType: subscription.plan_type,
-      startDate: subscription.start_date,
-      endDate: subscription.end_date,
-      message: success ? 'Payment successful! You are now a premium user.' : 'Payment pending or failed'
+      planType: subscription?.plan_type || planType,
+      startDate: subscription?.start_date,
+      endDate: subscription?.end_date,
+      message: finalSuccess ? 'Payment successful! You are now a premium user.' : 'Payment pending or failed'
     });
 
   } catch (error: any) {
@@ -532,111 +624,157 @@ router.post('/api/payment/verify', async (req: Request, res: Response) => {
 });
 
 // Cashfree webhook (for server-side notifications)
+// Dodo Payments webhook handler
+// CRITICAL: Must use express.raw() middleware (configured in server/index.ts)
 router.post('/api/payment/webhook', async (req: Request, res: Response) => {
   try {
-    const signature = req.headers['x-webhook-signature'] as string;
-    const timestamp = req.headers['x-webhook-timestamp'] as string;
-
-    // Verify webhook signature
-    const isValid = verifyCashfreeSignature(
-      JSON.stringify(req.body),
-      timestamp,
-      signature
-    );
-
-    if (!isValid) {
-      console.error('[Payment Webhook] Invalid signature');
-      return res.status(401).json({ error: 'Invalid signature' });
+    // CRITICAL: Get raw body for signature verification
+    // req.body is a Buffer when using express.raw()
+    let rawBody: string;
+    
+    if (Buffer.isBuffer(req.body)) {
+      // Raw body from express.raw() middleware
+      rawBody = req.body.toString('utf8');
+    } else if (typeof req.body === 'string') {
+      // Already a string
+      rawBody = req.body;
+    } else {
+      // Fallback: body was already parsed (shouldn't happen with correct middleware)
+      rawBody = JSON.stringify(req.body);
+      console.warn('[Dodo Webhook] ⚠️ Body was already parsed - signature verification may fail');
     }
 
-    const { type, data } = req.body;
+    console.log('[Dodo Webhook] Received webhook:', {
+      bodyType: Buffer.isBuffer(req.body) ? 'Buffer' : typeof req.body,
+      bodyLength: Buffer.isBuffer(req.body) ? req.body.length : (typeof req.body === 'string' ? req.body.length : 'unknown')
+    });
 
-    console.log('[Payment Webhook] Received:', type, 'Order:', data.order?.order_id);
+    // Verify webhook signature using Dodo SDK
+    let event: any;
+    try {
+      event = verifyDodoWebhook(rawBody, req.headers);
+      console.log('[Dodo Webhook] ✅ Signature verified successfully');
+    } catch (verifyError: any) {
+      console.error('[Dodo Webhook] ❌ Invalid signature - REJECTING webhook');
+      console.error('[Dodo Webhook] Error:', verifyError.message);
+      return res.status(401).json({ error: 'Invalid webhook signature' });
+    }
 
-    if (type === 'PAYMENT_SUCCESS_WEBHOOK') {
-      const orderId = data.order?.order_id;
+    const { type, data } = event;
 
-      if (orderId && isSupabaseConfigured) {
-        // Get subscription with full details
-        const { data: subscription, error: subError } = await supabase
-          .from('subscriptions')
-          .select('id, user_id, plan_type, amount, started_at, created_at, expires_at')
-          .eq('cashfree_order_id', orderId)
-          .single();
+    console.log('[Dodo Webhook] Received event type:', type);
+    console.log('[Dodo Webhook] Full event:', JSON.stringify(event, null, 2));
 
-        if (subscription && !subError) {
-          // Calculate expiry
-          let expiry = new Date();
-          if (subscription.plan_type === 'weekly') {
-            expiry.setDate(expiry.getDate() + 7);
-          } else {
-            expiry.setTime(expiry.getTime() + 24 * 60 * 60 * 1000);
+    // Handle payment.succeeded event (per Dodo error guide)
+    if (type === 'payment.succeeded') {
+      const paymentData = event.data;
+      const metadata = paymentData?.metadata;
+      
+      // CRITICAL: Extract user_id from metadata (source of truth per Dodo error guide)
+      if (!metadata?.user_id) {
+        console.error('[Dodo Webhook] ❌ Missing user_id in payment metadata');
+        console.error('[Dodo Webhook] Metadata:', metadata);
+        return res.status(200).json({ received: true, error: 'Missing user_id in metadata' });
+      }
+
+      const userId = metadata.user_id;
+      const planType = metadata.plan_type;
+      const amount = parseFloat(metadata.amount) || 0;
+      const checkoutSessionId = paymentData?.session_id || paymentData?.checkout_session_id;
+
+      console.log(`[Dodo Webhook] 🔓 Unlocking premium access for user ${userId}`);
+
+      // Calculate expiry
+      const now = new Date();
+      let expiry = new Date();
+      if (planType === 'monthly') {
+        expiry.setMonth(expiry.getMonth() + 1);
+      } else {
+        // Fallback for old plan types
+        expiry.setTime(expiry.getTime() + 24 * 60 * 60 * 1000);
+      }
+
+      // CRITICAL: Unlock premium FIRST (idempotent - safe to retry)
+      // Per Dodo error guide: "Unlock first, record later"
+      const { error: upgradeError } = await supabase
+        .from('users')
+        .update({
+          premium_user: true,
+          subscription_plan: planType,
+          subscription_expiry: expiry.toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
+      if (upgradeError) {
+        console.error('[Dodo Webhook] ❌ Failed to upgrade user:', upgradeError.message);
+      } else {
+        console.log(`[Dodo Webhook] ✅ User ${userId} upgraded to premium (Plan: ${planType})`);
+      }
+
+      // Update subscription record if it exists (CRITICAL for tracking)
+      if (isSupabaseConfigured) {
+        try {
+          // First, try to find by dodo_order_id from metadata
+          const dodoOrderId = metadata?.dodo_order_id || metadata?.order_id;
+          let subscription = null;
+          
+          if (dodoOrderId) {
+            const { data: subByOrderId } = await supabase
+              .from('subscriptions')
+              .select('id')
+              .eq('dodo_order_id', dodoOrderId)
+              .maybeSingle();
+            subscription = subByOrderId;
+          }
+          
+          // If not found by order ID, try to find pending subscription
+          if (!subscription) {
+            const { data: subPending } = await supabase
+              .from('subscriptions')
+              .select('id')
+              .eq('user_id', userId)
+              .eq('status', 'pending')
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            subscription = subPending;
           }
 
-          // Update subscription status (triggers will handle user upgrade)
-          const { error: updateError } = await supabase
-            .from('subscriptions')
-            .update({
-              status: 'active',
-              cashfree_payment_id: data.payment?.cf_payment_id,
-              expires_at: subscription.expires_at || expiry.toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq('cashfree_order_id', orderId);
-
-          if (updateError) {
-            console.error('[Payment Webhook] Error updating subscription:', updateError);
-          }
-
-          // Also directly update user (backup in case triggers don't fire)
-          const { error: userError } = await supabase
-            .from('users')
-            .update({
-              premium_user: true,
-              subscription_plan: subscription.plan_type,
-              subscription_expiry: subscription.expires_at || expiry.toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', subscription.user_id);
-
-          if (userError) {
-            console.error('[Payment Webhook] Error updating user:', userError);
-          } else {
-            console.log('[Payment Webhook] ✅ User upgraded:', subscription.user_id, 'Plan:', subscription.plan_type);
-          }
-
-          // Insert/update payment record with status='success' (CRITICAL FOR ACCESS)
-          const { data: existingPayment } = await supabase
-            .from('payments')
-            .select('id, status')
-            .eq('cashfree_order_id', orderId)
-            .single();
-
-          if (!existingPayment) {
-            await supabase.from('payments').insert({
-              user_id: subscription.user_id,
-              subscription_id: subscription.id,
-              cashfree_order_id: orderId,
-              cashfree_payment_id: data.payment?.cf_payment_id,
-              amount: subscription.amount || 0,
-              status: 'success',
-              plan_type: subscription.plan_type,
-              created_at: new Date().toISOString()
-            });
-          } else {
+          if (subscription) {
             await supabase
-              .from('payments')
+              .from('subscriptions')
               .update({
-                status: 'success',
-                cashfree_payment_id: data.payment?.cf_payment_id,
-                updated_at: new Date().toISOString()
+                status: 'active',
+                expires_at: expiry.toISOString(),
+                updated_at: new Date().toISOString(),
               })
-              .eq('cashfree_order_id', orderId);
+              .eq('id', subscription.id);
+            console.log(`[Dodo Webhook] ✅ Updated subscription ${subscription.id} to active`);
+          } else {
+            console.warn(`[Dodo Webhook] ⚠️ No subscription record found for user ${userId} - premium still unlocked via users table`);
           }
-        } else {
-          console.warn('[Payment Webhook] Subscription not found for order:', orderId);
+        } catch (subError) {
+          console.warn('[Dodo Webhook] ⚠️ Subscription update failed (non-blocking):', subError);
+        }
+
+        // OPTIONAL: Record payment (non-blocking per Dodo error guide)
+        try {
+          await supabase.from('payments').insert({
+            user_id: userId,
+            payment_id: paymentData.payment_id || checkoutSessionId,
+            provider: 'dodo',
+            status: 'PAID',
+            amount: amount,
+            plan_type: planType,
+            created_at: new Date().toISOString(),
+          });
+        } catch (paymentError) {
+          console.warn('[Dodo Webhook] ⚠️ Payment record insert failed (non-blocking):', paymentError);
         }
       }
+    } else {
+      console.log('[Dodo Webhook] ⚠️ Unhandled event type:', type);
     }
 
     res.json({ success: true });

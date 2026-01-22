@@ -57,12 +57,5 @@ export default defineConfig({
         secure: false,
       },
     },
-    headers: {
-      // Allow unsafe-eval in development for Vite HMR and dev tools
-      // This is safe in development but should be removed in production
-      'Content-Security-Policy': process.env.NODE_ENV === 'development' 
-        ? "script-src 'self' 'unsafe-eval' 'unsafe-inline' https:; object-src 'none'; base-uri 'self';"
-        : "script-src 'self' 'unsafe-inline' https:; object-src 'none'; base-uri 'self';"
-    },
   },
 });

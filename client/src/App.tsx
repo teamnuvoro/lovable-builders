@@ -7,7 +7,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { TopNavbar } from "@/components/TopNavbar";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { initAmplitude } from "@/utils/amplitudeTracking";
-import { BackdoorActivator } from "@/components/BackdoorActivator";
 import ChatPage from "@/pages/ChatPage";
 import CallPage from "@/pages/CallPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
@@ -21,8 +20,8 @@ import LandingPage from "@/pages/LandingPage";
 import AdminAnalytics from "@/pages/AdminAnalytics";
 import UserJourneyPage from "@/pages/UserJourneyPage";
 
-import SignupPage from "@/pages/SignupPageSimple";
-import LoginPage from "@/pages/LoginPageSimple";
+import SignupPage from "@/pages/SignupPage";
+import LoginPage from "@/pages/LoginPage";
 import NotFound from "@/pages/not-found";
 import { analytics } from "@/lib/analytics";
 
@@ -79,16 +78,6 @@ function Router() {
       {/* ----------------------------------------------------------------- */}
       <Route path="/">
         {() => {
-          // 🔓 Frontend Backdoor Check
-          const backdoorActive = typeof window !== 'undefined' && 
-              (localStorage.getItem('backdoor_enabled') === 'true' || 
-               sessionStorage.getItem('backdoor_enabled') === 'true' ||
-               new URLSearchParams(window.location.search).get('backdoor') === 'true');
-
-          if (backdoorActive) {
-            return <Redirect to="/chat" />;
-          }
-
           const { isLoading } = useAuth();
           if (isLoading) return <div className="flex h-screen w-full items-center justify-center bg-pink-50"></div>;
 
@@ -159,6 +148,12 @@ function Router() {
 
 function App() {
   useEffect(() => {
+    // Clear any existing backdoor flags (backdoor functionality has been removed)
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('backdoor_enabled');
+      sessionStorage.removeItem('backdoor_enabled');
+    }
+    
     // Initialize custom analytics
     analytics.initialize();
 
@@ -194,7 +189,6 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <TooltipProvider>
-          <BackdoorActivator />
           <Router />
           <Toaster />
         </TooltipProvider>
